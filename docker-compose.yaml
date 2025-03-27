@@ -4,9 +4,19 @@ services:
     image: ghcr.io/clemcer/loggifly:latest
     container_name: loggifly
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./logsend/config.yaml:/app/config.yaml
     environment:
-      - TZ=Europe/Berlin
+      TZ: Europe/Berlin
+      DOCKER_HOST: tcp://socket-proxy:2375
     restart: unless-stopped
-
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy
+    environment:
+      - CONTAINERS=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run

@@ -81,9 +81,9 @@ services:
     image: ghcr.io/clemcer/loggifly:latest
     container_name: loggifly
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
 #      - ./config.yaml:/app/config.yaml  # Path to your config file (ignore if you are only using environment variables)
     environment:
+      DOCKER_HOST: tcp://socket-proxy:2375
       # Choose at least one notification service
       NTFY_URL: "https://ntfy.sh"       # or your self-hosted instance
       NTFY_TOPIC: "your_topic"          # e.g., "docker_alerts"
@@ -96,6 +96,17 @@ services:
       CONTAINERS: "vaultwarden,audiobookshelf"        # Comma-separated list
       GLOBAL_KEYWORDS: "error,failed login,password"  # Basic keyword monitoring
       GLOBAL_KEYWORDS_WITH_ATTACHMENT: "critical"     # Attaches a log file to the notification
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy
+    environment:
+      - CONTAINERS=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run
     restart: unless-stopped 
 ```
 </details>
@@ -290,6 +301,7 @@ Except for container specific settings and regex patterns you can configure most
 | `DISBLE_START_MESSAGE`          | Disable startup message.                                  | False     |
 | `DISBLE_SHUTDOWN_MESSAGE`       | Disable shutdown message.                                 | False     |
 | `DISABLE_RESTART_MESSAGE`       | Disable message on config change when program restarts.| False     |
+| `DOCKER_HOST`                   | Docker socket proxy URL                                    | _N/A_ |
 
 </details>
 
