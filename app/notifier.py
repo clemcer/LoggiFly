@@ -34,7 +34,7 @@ def send_apprise_notification(url, container_name, message, title, file_name=Non
 
 def send_ntfy_notification(config, container_name, message, title, file_name=None):
     """
-    Sendet eine Benachrichtigung an den ntfy-Server.
+    Send a notification to a ntfy-Server.
     """
     ntfy_url = config.notifications.ntfy.url
     
