@@ -167,7 +167,7 @@ class LogProcessor:
                     self._handle_and_clear_buffer()
 
     # This is the only function that gets called from outside this class by the monitor_container_logs function in app.py
-    # If the user disables it or if there are no patterns detected (yet) the programm switches to single-line mode
+    # If the user disables it or if there are no patterns detected (yet) the program switches to single-line mode
     # In single-line mode the line gets processed and searched for keywords instantly instead of going into the buffer first
     def process_line(self, line):
         clean_line = re.sub(r"\x1b\[[0-9;]*m", "", line)
