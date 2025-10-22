@@ -308,8 +308,6 @@ class NotificationsConfig(BaseConfigModel):
 class HostConfig(BaseConfigModel):
     monitor_all_containers: bool = False
     excluded_containers: Optional[List[str]] = None
-    monitor_all_swarm_services: bool = False
-    excluded_swarm_services: Optional[List[str]] = None
     containers: dict[str, ContainerConfig] | None = None
 
 class GlobalConfig(BaseConfigModel):

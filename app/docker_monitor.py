@@ -171,18 +171,16 @@ class DockerLogMonitor:
     def _get_host_config(self):
         # self.swarm_services_config = self.config.swarm_services or {} # TODO
         host_config = self.config.hosts.get(self.hostname) if isinstance(self.config.hosts, dict) and self.hostname else None
+        self.monitor_all_swarm_services = self.config.settings.monitor_all_swarm_services
+        self.excluded_swarm_services = self.config.settings.excluded_swarm_services or []
         if not host_config:
             containers_config = self.config.containers or {}
             self.monitor_all_containers = self.config.settings.monitor_all_containers
             self.excluded_containers = self.config.settings.excluded_containers or []
-            self.monitor_all_swarm_services = self.config.settings.monitor_all_swarm_services
-            self.excluded_swarm_services = self.config.settings.excluded_swarm_services or []
         else:
             containers_config = host_config.containers or {}
-            self.monitor_all_containers = host_config.monitor_all_containers or self.config.settings.monitor_all_containers
+            self.monitor_all_containers = host_config.monitor_all_containers if host_config.monitor_all_containers is not None else self.config.settings.monitor_all_containers
             self.excluded_containers = host_config.excluded_containers or self.config.settings.excluded_containers or []
-            self.monitor_all_swarm_services = host_config.monitor_all_swarm_services or self.config.settings.monitor_all_swarm_services
-            self.excluded_swarm_services = host_config.excluded_swarm_services or self.config.settings.excluded_swarm_services or []
             if self.config.containers:
                 for container_name, container_config in self.config.containers.items():
                     if container_name not in containers_config:
@@ -196,31 +194,6 @@ class DockerLogMonitor:
         """
         self.selected_containers = []
         self.selected_swarm_services = []
-
-        # monitor_all_containers = self.config.settings.monitor_all_containers
-        # excluded_containers = self.config.settings.excluded_containers or []
-        # if monitor_all_containers:
-        #     for c in self.client.containers.list():
-        #         if c.name not in excluded_containers:
-        #             if c.name not in self.containers_config:
-        #                 self.containers_config[c.name] = ModelContainerConfig()
-        #             self.selected_containers.append(c.name)
-
-        # monitor_all_swarm_services = self.config.settings.monitor_all_swarm_services
-        # excluded_swarm_services = self.config.settings.excluded_swarm_services or []
-        # if monitor_all_swarm_services:
-        #     for s in self.client.services.list():
-        #         if s.name not in excluded_swarm_services:
-        #             if s.name not in self.config.swarm_services:
-        #                 self.swarm_services_config[s.name] = ModelSwarmServiceConfig()
-        #             self.selected_swarm_services.append(s.name)
-
-        # configs_to_check = []
-        # if not monitor_all_swarm_services:
-        #     configs_to_check.append((self.swarm_services_config, self.selected_swarm_services, "Swarm Service"))
-        # if not monitor_all_containers:
-        #     configs_to_check.append((self.containers_config, self.selected_containers, "Container"))
-
         configs_to_check = [
             (self.containers_config, self.selected_containers, "Container"),
             (self.config.swarm_services, self.selected_swarm_services, "Swarm Service"),
@@ -268,7 +241,6 @@ class DockerLogMonitor:
                 if service_name in self.selected_swarm_services:
                     return ContainerConfig(MonitorType.SWARM, service_name, unit_name, self.config.swarm_services[service_name], cname, cid)
                 elif stack_name in self.selected_swarm_services:
-                    decision = MonitorDecision.MONITOR
                     return ContainerConfig(MonitorType.SWARM, stack_name, unit_name, self.config.swarm_services[stack_name], cname, cid)
             # Check if it should be monitored because of `monitor_all_swarm_services` setting
             if decision == MonitorDecision.UNKNOWN and self.monitor_all_swarm_services:
@@ -289,7 +261,7 @@ class DockerLogMonitor:
             elif decision == MonitorDecision.SKIP:
                 return None
             # Check if the container is configured via normal configuration
-            elif decision == MonitorDecision.UNKNOWN and container.name in self.selected_containers and self.config.containers:
+            elif decision == MonitorDecision.UNKNOWN and container.name in self.selected_containers:
                 return ContainerConfig(MonitorType.CONTAINER, cname, cname, self.containers_config[cname], cname, cid)
             # Check if it should be monitored because of `monitor_all_containers` setting
             elif decision == MonitorDecision.UNKNOWN and self.monitor_all_containers:
@@ -486,6 +458,8 @@ class DockerLogMonitor:
             messages.append("These Swarm Containers are being monitored" + prefix + separator.join(monitored_swarm_service_units))
         if unmonitored_swarm_services:
             messages.append("These Swarm Services are not running" + prefix + separator.join(unmonitored_swarm_services))
+        if not monitored_container_names and not unmonitored_containers and not monitored_swarm_service_units and not unmonitored_swarm_services:
+            messages.append("No containers are configured.")
         message = "\n\n".join(messages)
         if self.hostname:
             message = f"[{self.hostname}]\n" + message
