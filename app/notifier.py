@@ -7,6 +7,7 @@ import logging
 from pydantic import SecretStr
 import urllib.parse
 from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfig
+from utils import replace_emojis_with_rfc2047
 
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
@@ -166,6 +167,9 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: dict | None 
     Handles authorization and message truncation.
     """
     message = ("This message had to be shortened: \n" if len(message) > 3900 else "") + message[:3900]
+    
+    title = replace_emojis_with_rfc2047(title)
+
     headers = {
         "Title": title.encode("latin-1", errors="ignore").decode("latin-1").strip(),
         "Tags": f"{ntfy_config['tags']}",
