@@ -7,10 +7,21 @@ import logging
 from pydantic import SecretStr
 import urllib.parse
 from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfig
+from email.header import Header
+from constants import EMOJI_PATTERN
 
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
 
+
+def emoji_to_rfc2047(match):
+    """Convert the matched emoji to RFC 2047 encoding."""
+    emoji = match.group(0)
+    return Header(emoji, "utf-8").encode()
+
+def replace_emojis_with_rfc2047(text):
+    """Replace all emojis in a text with RFC 2047 encoded forms."""
+    return EMOJI_PATTERN.sub(emoji_to_rfc2047, text)
 
 def get_ntfy_config(config: GlobalConfig, message_config, unit_config) -> dict:
     """
@@ -166,6 +177,9 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: dict | None 
     Handles authorization and message truncation.
     """
     message = ("This message had to be shortened: \n" if len(message) > 3900 else "") + message[:3900]
+    
+    title = replace_emojis_with_rfc2047(title)
+
     headers = {
         "Title": title.encode("latin-1", errors="ignore").decode("latin-1").strip(),
         "Tags": f"{ntfy_config['tags']}",
