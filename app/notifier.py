@@ -7,11 +7,21 @@ import logging
 from pydantic import SecretStr
 import urllib.parse
 from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfig
-from utils import replace_emojis_with_rfc2047
+from email.header import Header
+from constants import EMOJI_PATTERN
 
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
 
+
+def emoji_to_rfc2047(match):
+    """Convert the matched emoji to RFC 2047 encoding."""
+    emoji = match.group(0)
+    return Header(emoji, "utf-8").encode()
+
+def replace_emojis_with_rfc2047(text):
+    """Replace all emojis in a text with RFC 2047 encoded forms."""
+    return EMOJI_PATTERN.sub(emoji_to_rfc2047, text)
 
 def get_ntfy_config(config: GlobalConfig, message_config, unit_config) -> dict:
     """
