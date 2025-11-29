@@ -108,7 +108,8 @@ def get_ntfy_config(config: GlobalConfig, message_config, unit_config) -> dict:
         "authorization": "",
         "actions": None,
         "icon": None,
-        "click": None
+        "click": None,
+        "markdown": None
     }
 
     global_config = config.notifications.ntfy.model_dump(exclude_none=True) if config.notifications.ntfy else {}
@@ -267,6 +268,8 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: dict | None 
         headers["Icon"] = ntfy_config.get("icon")
     if ntfy_config.get("click"):
         headers["Click"] = ntfy_config.get("click")
+    if ntfy_config.get("markdown"):
+        headers["Markdown"] = str(ntfy_config.get("markdown"))
     try:
         if attachment and (file_content := attachment.get("content", "").encode("utf-8")):
             headers["Filename"] = attachment.get("file_name", "attachment.txt")
