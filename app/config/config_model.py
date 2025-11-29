@@ -111,6 +111,8 @@ class ModularSettings(BaseConfigModel):
     ntfy_username: Optional[str] = None
     ntfy_password: Optional[SecretStr] = None
     ntfy_actions: Optional[List[NtfyAction]] = None
+    ntfy_icon: Optional[str] = None
+    ntfy_click: Optional[str] = None
     apprise_url: Optional[SecretStr] = None
     webhook_url: Optional[str] = None
     webhook_headers: Optional[dict] = None

@@ -106,7 +106,9 @@ def get_ntfy_config(config: GlobalConfig, message_config, unit_config) -> dict:
         "username": None,
         "password": None,
         "authorization": "",
-        "actions": None
+        "actions": None,
+        "icon": None,
+        "click": None
     }
 
     global_config = config.notifications.ntfy.model_dump(exclude_none=True) if config.notifications.ntfy else {}
@@ -261,6 +263,10 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: dict | None 
         action_header = build_ntfy_action_header(ntfy_config.get('actions', []))
         logger.debug(f"ACTION HEADER: {action_header}")
         headers["Actions"] = action_header
+    if ntfy_config.get("icon"):
+        headers["Icon"] = ntfy_config.get("icon")
+    if ntfy_config.get("click"):
+        headers["Click"] = ntfy_config.get("click")
     try:
         if attachment and (file_content := attachment.get("content", "").encode("utf-8")):
             headers["Filename"] = attachment.get("file_name", "attachment.txt")
