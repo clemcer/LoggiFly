@@ -14,6 +14,8 @@ from typing import List, Optional, Union, ClassVar, Annotated, Any
 import logging
 import re
 import copy
+from datetime import datetime, timedelta, timezone
+import dateparser
 
 
 class BaseConfigModel(BaseModel):
@@ -114,6 +116,7 @@ class ModularSettings(BaseConfigModel):
     ntfy_icon: Optional[str] = None
     ntfy_click: Optional[str] = None
     ntfy_markdown: Optional[bool] = None
+    ntfy_delay: Optional[str] = None
     apprise_url: Optional[SecretStr] = None
     webhook_url: Optional[str] = None
     webhook_headers: Optional[dict] = None
@@ -142,6 +145,12 @@ class ModularSettings(BaseConfigModel):
         if v and isinstance(v, list):
             return validate_ntfy_actions(v)
         return v   
+
+    @field_validator("ntfy_delay", mode="before")
+    def validate_delay(cls, v):
+        if v is None:
+            return None
+        return validate_ntfy_delay(v) 
 
     @field_validator("action_cooldown", mode="before")
     def validate_action_cooldown(cls, v):
@@ -531,3 +540,62 @@ def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
             break
         filtered_actions.append(raw)
     return filtered_actions
+
+def validate_ntfy_delay(value) -> datetime:
+    # Ntfy delay validation constants and regex
+    MIN_DELAY = timedelta(seconds=10)
+    MAX_DELAY = timedelta(days=3)
+
+    DURATION_RE = re.compile(r"^\s*(\d+)\s*(s|m|h|d|sec|min|hour|day|seconds|minutes|hours|days)\s*$", re.I)
+
+    UNIT_MAP = {
+        "s": "seconds",
+        "sec": "seconds",
+        "seconds": "seconds",
+        "m": "minutes",
+        "min": "minutes",
+        "minutes": "minutes",
+        "h": "hours",
+        "hour": "hours",
+        "hours": "hours",
+        "d": "days",
+        "day": "days",
+        "days": "days",
+    }
+
+    now = datetime.now(timezone.utc)
+
+    # Unix timestamp
+    if isinstance(value, (int, float)):
+        dt = datetime.fromtimestamp(value, tz=timezone.utc)
+
+    # Duration string (30m, 3h, 2 days)
+    elif isinstance(value, str) and DURATION_RE.match(value):
+        num, unit = DURATION_RE.match(value).groups()
+        unit = UNIT_MAP[unit.lower()]
+        delta = timedelta(**{unit: int(num)})
+        dt = now + delta
+
+    # Natural language ("tomorrow", "3pm", "Tuesday")
+    elif isinstance(value, str):
+        dt = dateparser.parse(
+            value,
+            settings={"TIMEZONE": "UTC", "RETURN_AS_TIMEZONE_AWARE": True},
+        )
+        if not dt:
+            logging.warning(f"Invalid natural language datetime for ntfy.delay: '{value}'")
+            return None
+    else:
+        logging.warning(f"Invalid format for ntfy.delay: '{value}'")
+        return None
+
+    # Enforce limits
+    if dt < now + MIN_DELAY:
+        logging.warning("Delay must be at least 10 seconds")
+        return None
+    if dt > now + MAX_DELAY:
+        logging.warning("Delay cannot exceed 3 days")
+        return None
+
+    return value 
+
