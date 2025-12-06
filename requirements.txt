@@ -4,4 +4,3 @@ pyyaml
 watchdog
 apprise
 pydantic
-dateparser
