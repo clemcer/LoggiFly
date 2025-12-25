@@ -41,6 +41,28 @@ containers:
           template: '🚨 Failed login!\n📧 Email: ''{email}''\n🔎 IP Address: {ip_address}\n🕐 {timestamp}'
           hide_pattern_in_title: true # Hide full regex pattern in notification title
 
+  homeassistant:
+    ntfy_tags: closed_lock_with_key
+    ntfy_priority: 5
+    ntfy_topic: security
+    notification_title: 'Failed Home Assistant login'
+    notification_cooldown: 0
+    keywords:
+        - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*Login attempt or request with invalid authentication from (?P<ip>.*)\. Requested URL.*'
+          template: '🚨 Failed login!\n🔎 IP Address: {ip}\n🕐 {timestamp}'
+          hide_pattern_in_title: true # Hide full regex pattern in notification title
+
+  immich_server:
+    ntfy_tags: closed_lock_with_key
+    ntfy_priority: 5
+    ntfy_topic: security
+    notification_title: 'Failed Immich login'
+    notification_cooldown: 0
+    keywords:
+        - regex: '.*(?P<timestamp>\d{2}\/\d{2}\/\d{4}, \d+:\d{2}:\d{2} (?:AM|PM)).*Failed login attempt for user (?P<username>.*) from ip address (?P<ip>.*)'
+          template: '🚨 Failed login!\n📧 Username: ''{username}''\n🔎 IP Address: {ip}\n🕐 {timestamp}'
+          hide_pattern_in_title: true # Hide full regex pattern in notification title
+
   ebook2audiobook:
     attachment_lines: 300
     keywords:
