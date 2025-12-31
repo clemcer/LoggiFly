@@ -8,8 +8,8 @@ class MonitorType(Enum):
     SWARM = "swarm"
 
 
-class MonitorDecision(Enum):
-    """Decisions for whether to monitor a container based on labels and configuration."""
+class MonitorLabelDecision(Enum):
+    """Decisions for whether to monitor a container based on labels."""
     MONITOR = "monitor"
     SKIP = "skip"
     UNKNOWN = "unknown"
