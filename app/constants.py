@@ -84,3 +84,38 @@ class Actions(Enum):
     STOP = "stop"
     RESTART = "restart"
     START = "start"
+
+class NotificationType(Enum):
+    """Types of notifications that can be triggered by keywords."""
+    LOG_MATCH = "log_match"
+    DOCKER_EVENT = "event"
+
+MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS = {
+    "start": "start",
+    "stop": "stop",
+    "die": "die",
+    "crash": "die", # with exitCode != 0
+    "destroy": "destroy",
+    "healthy": "health_status: healthy",
+    "unhealthy": "health_status: unhealthy",
+}
+
+MAP_EVENT_TO_TITLE = {
+    "start": "Container '{container}' started",
+    "stop": "Container '{container}' stopped",
+    "die": "Container '{container}' crashed",
+    "crash": "Container '{container}' crashed",
+    "destroy": "Container '{container}' destroyed",
+    "healthy": "Container '{container}' is healthy",
+    "unhealthy": "Container '{container}' is unhealthy",
+}
+
+MAP_EVENT_TO_MESSAGE = {
+    "start": "Container '{container}' was started.",
+    "stop": "Container '{container}' was stopped.",
+    "die": "Container '{container}' died with exit code: {exit_code}.",
+    "crash": "Container '{container}' crashed. Exit code: {exit_code}.",
+    "destroy": "Container '{container}' was destroyed.",
+    "healthy": "Container '{container}' is healthy.",
+    "unhealthy": "Container '{container}' is unhealthy.",
+}

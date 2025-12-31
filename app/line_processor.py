@@ -8,13 +8,15 @@ import logging
 import traceback
 import threading
 from threading import Thread, Lock
-from notifier import send_notification
-from services import perform_olivetin_action
-from config.config_model import GlobalConfig, KeywordItem, RegexItem, KeywordGroup
+from config.config_model import GlobalConfig, KeywordItem, RegexItem, KeywordGroup, ContainerConfig, SwarmServiceConfig
 from constants import (
     COMPILED_STRICT_PATTERNS, 
     COMPILED_FLEX_PATTERNS,
+    NotificationType,
 )
+from notification_formatter import NotificationContext
+from utils import merge_modular_settings, merge_with_precedence
+from trigger import process_trigger
 
 
 class LogProcessor:
@@ -34,11 +36,9 @@ class LogProcessor:
     def __init__(self,
                  logger, 
                  config: GlobalConfig, 
-                 unit_config,
+                 unit_config: ContainerConfig | SwarmServiceConfig,
                  monitor_instance,
-                 unit_name, 
-                 monitor_type,
-                 unit_stop_event,
+                 unit_context,
                  hostname=None 
                  ):
         """
@@ -56,9 +56,10 @@ class LogProcessor:
         """
         self.logger = logger
         self.hostname = hostname    # Hostname for multi-client setups to differentiate between clients; empty if single client
-        self.unit_stop_event = unit_stop_event
-        self.unit_name = unit_name
-        self.monitor_type = monitor_type
+        self.unit_context = unit_context
+        self.unit_stop_event = unit_context.stop_monitoring_event
+        self.unit_name = unit_context.unit_name
+        self.monitor_type = unit_context.monitor_type
         self.monitor_instance = monitor_instance
         self.unit_config = unit_config
 
@@ -77,7 +78,6 @@ class LogProcessor:
         # These are updated in load_config_variables()
         self.multi_line_mode = False 
         self.time_per_keyword = {}
-        self.time_per_action = {}
 
         self.load_config_variables(config, unit_config)
         
@@ -105,7 +105,7 @@ class LogProcessor:
                 returned_keywords.append(({"keyword": item}))
                 continue
             if isinstance(item, (KeywordItem, RegexItem, KeywordGroup)):
-                item = item.model_dump()
+                item = item.model_dump(exclude_none=True)
             if isinstance(item, dict) and "keyword_group" in item:
                 item["keyword_group"] = tuple(item["keyword_group"])
                 returned_keywords.append(item)
@@ -127,23 +127,14 @@ class LogProcessor:
         self.config = config
         self.unit_config = unit_config
         self.time_per_keyword = {}
-        unt_cnf = self.unit_config.model_dump() if self.unit_config else {}
+        unt_cnf = self.unit_config.model_dump(exclude_none=True) if self.unit_config else {}
         
         # Merge global and unit-specific keywords
         self.keywords = self._get_keywords(unt_cnf.get("keywords", []))
         self.keywords.extend(self._get_keywords(self.config.global_keywords.keywords))        
 
         # Merge message configuration with precedence: unit_config > global_config
-        self.container_msg_cnf = {
-            "attachment_lines": unt_cnf.get("attachment_lines") or config.settings.attachment_lines,
-            "notification_cooldown": unt_cnf.get("notification_cooldown") if unt_cnf.get("notification_cooldown") is not None else config.settings.notification_cooldown,
-            "notification_title": unt_cnf.get("notification_title") or config.settings.notification_title,
-            "attach_logfile": unt_cnf.get("attach_logfile") if unt_cnf.get("attach_logfile") is not None else config.settings.attach_logfile,
-            "excluded_keywords": (unt_cnf.get("excluded_keywords") or []) + (config.settings.excluded_keywords or []),
-            "hide_regex_in_title": unt_cnf.get("hide_regex_in_title") if unt_cnf.get("hide_regex_in_title") is not None else config.settings.hide_regex_in_title,
-            "disable_notifications": unt_cnf.get("disable_notifications") or config.settings.disable_notifications or False,
-            "action_cooldown": unt_cnf.get("action_cooldown") or config.settings.action_cooldown or 300,
-        }
+        self.unit_modular_settings = merge_modular_settings(unt_cnf, config.settings.model_dump(exclude_none=True))
         self.multi_line_mode = config.settings.multi_line_entries
         self.start_flush_thread_if_needed()
 
@@ -186,18 +177,6 @@ class LogProcessor:
             self.logger.info(f"{self.unit_name}: No pattern found in logs after {self.line_limit} lines. Mode: single-line")
 
         self.waiting_for_pattern = False
-
-    def _get_message_config(self, keyword_message_config):
-        """
-        Merge container-level message config into keyword-level config for a single message.
-        With keyword level settings taking precedence over container level settings.
-        """
-        for key, value in self.container_msg_cnf.items():
-            if key not in keyword_message_config:
-                keyword_message_config[key] = value
-            elif isinstance(value, list) and isinstance(keyword_message_config.get(key), list):
-                keyword_message_config[key].extend(value)
-        return keyword_message_config
 
     def process_line(self, line: str):
         """        
@@ -291,25 +270,34 @@ class LogProcessor:
         if keyword_dict.get("notification_cooldown"):
             notification_cooldown = keyword_dict["notification_cooldown"]
         else:
-            notification_cooldown = self.container_msg_cnf.get("notification_cooldown", 10)
+            notification_cooldown = self.unit_modular_settings.get("notification_cooldown", 10)
         log_line = log_line.lower()
         
         if "regex" in keyword_dict:
             regex = keyword_dict["regex"]
+            if not regex:
+                self.logger.error(f"Regex is empty for {keyword_dict}")
+                return None
             if ignore_keyword_time or time.time() - self.time_per_keyword.get(regex, 0) >= int(notification_cooldown):
                 match = re.search(regex, log_line, re.IGNORECASE)
                 if match:
                     self.time_per_keyword[regex] = time.time()
-                    hide_pattern = keyword_dict.get("hide_regex_in_title") if keyword_dict.get("hide_regex_in_title") else self.container_msg_cnf["hide_regex_in_title"]
+                    hide_pattern = keyword_dict.get("hide_regex_in_title") if keyword_dict.get("hide_regex_in_title") else self.unit_modular_settings.get("hide_regex_in_title", False)
                     return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
         elif "keyword" in keyword_dict:
             keyword = keyword_dict["keyword"]
+            if not keyword:
+                self.logger.error(f"Keyword is empty for {keyword_dict}")
+                return None
             if ignore_keyword_time or time.time() - self.time_per_keyword.get(keyword, 0) >= int(notification_cooldown):
                 if keyword.lower() in log_line:
                     self.time_per_keyword[keyword] = time.time()
                     return keyword
         elif "keyword_group" in keyword_dict:
             keyword_group = keyword_dict["keyword_group"]
+            if not keyword_group:
+                self.logger.error(f"Keyword group is empty for {keyword_dict}")
+                return None
             if ignore_keyword_time or time.time() - self.time_per_keyword.get(keyword_group, 0) >= int(notification_cooldown):
                 if all(keyword.lower() in log_line for keyword in keyword_group):
                     self.time_per_keyword[keyword_group] = time.time()
@@ -322,104 +310,54 @@ class LogProcessor:
         If a keyword is found, trigger notification and/or get attachment, container action, OliveTin action, etc.
         """
         keywords_found = []
-        excluded_keywords = []
-        olivetin_configs = []
-        keyword_msg_cnf = {"message": log_line, "unit_name": self.unit_name, "monitor_type": self.monitor_type.value}
-        template_found = False
+        keyword_level_config = {}
         
         # Search for configured keywords and collect their settings
         for keyword_dict in self.keywords:
             found = self._search_keyword(log_line, keyword_dict)
             if found:
-                # Apply template if one is configured (only first template is used)
-                if template_found is False and keyword_dict.get("template") or keyword_dict.get("json_template"):
-                    template_found = True
-                    keyword_msg_cnf["message"] = message_from_template(keyword_dict, log_line)
-                # Merge keyword configuration into message config
-                for key, value in keyword_dict.items():
-                    if key == "excluded_keywords" and isinstance(value, list):
-                        excluded_keywords.extend(value)
-                    elif key == "olivetin_actions" and isinstance(value, list):
-                        olivetin_configs.extend(value)
-                    elif not keyword_msg_cnf.get(key) and value is not None:
-                        keyword_msg_cnf[key] = value
+                keyword_level_config = merge_with_precedence(keyword_level_config, keyword_dict, list_union=True)
                 keywords_found.append(found)
-
         if not keywords_found:
             return
             
         # When an excluded keyword is found, the log line gets ignored and the function returns
-        if ek := excluded_keywords + (self.container_msg_cnf.get("excluded_keywords") or []):
+        if ek := (keyword_level_config.get("excluded_keywords") or []) + (self.unit_modular_settings.get("excluded_keywords") or []):
+            self.logger.debug(f"Excluded keywords: {ek}")
             for keyword in self._get_keywords(ek):
                 found = self._search_keyword(log_line, keyword, ignore_keyword_time=True)
                 if found:
                     self.logger.debug(f"Keyword(s) '{keywords_found}' found in '{self.unit_name}' but ignored because excluded keyword '{found}' was found")
                     return
 
-        keyword_msg_cnf["keywords_found"] = keywords_found
-        action_to_perform = keyword_msg_cnf.get("action")
-        action_result = None
-        
-        # Perform container action if configured
-        if action_to_perform is not None:
-            cooldown = self.container_msg_cnf["action_cooldown"]
-            if self.time_per_action.get(action_to_perform, 0) < time.time() - int(cooldown):
-                action_result = self._container_action(action_to_perform) # returns result as a string that can be used in a notification title
-                if action_result:
-                    self.time_per_action[action_to_perform] = time.time()
-            else:
-                last_action_time = time.strftime("%H:%M:%S", time.localtime(self.time_per_action.get(action_to_perform, 0)))
-                self.logger.info(f"{self.unit_name}: Not performing action: '{action_to_perform}'. Action is on cooldown. Action was last performed at {last_action_time}. Cooldown is {cooldown} seconds.")
-
-        msg_cnf = self._get_message_config(keyword_msg_cnf)
-        attachment = None
-        
-        # Create log file attachment if requested
-        if msg_cnf["attach_logfile"]:
-            if result := self._log_attachment(msg_cnf["attachment_lines"]):
-                attachment = {"content": result[0], "file_name": result[1]}
-            else:
-                self.logger.error(f"Could not create log attachment file for Container {self.unit_name}")
-            
+        merged_modular_settings = merge_modular_settings(keyword_level_config, self.unit_modular_settings)
         formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(log_line.splitlines()) + "\n   -----------------------"
         self.logger.info(f"The following keywords were found in {self.unit_name}: {keywords_found}."
-                    + (f" (A Log FIle will be attached)" if attachment else "")
+                    + (f" (A Log FIle will be attached)" if merged_modular_settings.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )
-        disable_notifications = msg_cnf.get("disable_notifications") or self.container_msg_cnf.get("disable_notifications") or False
-        if disable_notifications:
-            self.logger.debug(f"Not sending notification for {self.unit_name} because notifications are disabled.")
-
-        # Send notification if not disabled
-        if not disable_notifications:
-            title = get_notification_title(msg_cnf, log_line, action_result)
-            self._send_message(title, msg_cnf["message"], msg_cnf, attachment=attachment)
-
-        # Trigger OliveTin action if configured
-        for olivetin_config in olivetin_configs:
-            if not olivetin_config.get("id"):
-                continue
-            self._start_olivetin_action(msg_cnf, olivetin_config, disable_notifications)
-    
-    def _start_olivetin_action(self, msg_cnf, olivetin_config, disable_notifications=False):
-        def trigger_action():
-            if result := perform_olivetin_action(self.config, msg_cnf, olivetin_config):
-                title, message = result
-                if not disable_notifications:
-                    self._send_message(title, message, msg_cnf)
-    
-        thread = Thread(target=trigger_action, daemon=True)
-        thread.start()
-
-    def _send_message(self, title, message, msg_cnf, attachment=None):
-        send_notification(self.config,
-                        unit_name=self.unit_name,
-                        title=title,
-                        message=message,
-                        message_config=msg_cnf,
-                        unit_config=self.unit_config,
-                        attachment=attachment,
-                        hostname=self.hostname)
+        self.logger.debug(f"Keyword level config: {keyword_level_config}")
+        # self.logger.debug(f"Excluded keywords: {self._get_keywords(keyword_level_config.get('excluded_keywords') or [])}")
+        self.logger.debug(f"OliveTin actions: {keyword_level_config.get('olivetin_actions') or []}")
+        
+        notification_context = NotificationContext(
+            notification_type=NotificationType.LOG_MATCH,
+            unit_context=self.unit_context,
+            keywords_found=keywords_found,
+            log_line=log_line,
+            regex=keyword_level_config.get("regex"),
+            hostname=self.hostname,
+        )        
+        process_trigger(
+            logger=self.logger,
+            config=self.config,
+            modular_settings=merged_modular_settings,
+            trigger_level_config=keyword_level_config,
+            monitor_instance=self.monitor_instance,
+            unit_context=self.unit_context,
+            notification_context=notification_context,
+            # olivetin_configs=keyword_level_config.get("olivetin_actions", []) or [],
+        )
 
     def _log_attachment(self, number_attachment_lines):
         """Create a log file attachment with the specified number of lines."""
@@ -432,155 +370,6 @@ class LogProcessor:
             self.logger.error(f"Could not create log attachment file for Container {self.unit_name}: {e}")
             return None, None
 
-    def _container_action(self, action: str) -> Optional[str]:
-        """
-        Perform the specified container action (stop, start or restart). 
-        
-        Args:
-            action: Action string with syntax 'action' or 'action@container_name'
-            
-        Returns:
-            str or None: Result message that can be used in notification title
-        """
-        result = self.monitor_instance.container_action(self.monitor_type, self.unit_name, action)
-        return result
-
     def _tail_logs(self, lines=100):
         """Tail logs from the container. Calls the tail_logs method of the monitor instance."""
-        return self.monitor_instance.tail_logs(unit_name=self.unit_name, 
-                                                monitor_type=self.monitor_type, 
-                                                lines=lines)
-
-
-class SafeDict(dict):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.missing_keys = set()
-
-    def __missing__(self, key):
-        self.missing_keys.add(key)
-        return "{" + key + "}"
-
-
-def get_template_fields(message_config: dict, log_line: str, mode=None):
-    possible_template_fields = {}
-    if not mode or mode == "json":
-        # Add JSON fields to template fields if log line is JSON
-        try:
-            json_log_entry = json.loads(log_line)
-            possible_template_fields = json_log_entry           
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            pass
-        except Exception as e:
-            logging.error(f"Unexpected Error parsing log line as JSON: {log_line} {e}")
-    if not mode or mode == "regex":
-        # Apply template in case of regex named capturing groups
-        if message_config.get("regex"):
-            match = re.search(message_config["regex"], log_line, re.IGNORECASE)
-            if match:
-                groups = match.groupdict()
-                for key, value in groups.items():
-                    if key in possible_template_fields:
-                        continue
-                    possible_template_fields[key] = value
-    return possible_template_fields
-
-def get_notification_title(message_config: dict, log_line: str, action_result: Optional[str] = None):
-    """
-    Generate a notification title. 
-    'notification_title' is the legacy title template. 'title_template' is the new one.
-    
-    Args:
-        message_config: Message configuration dictionary
-        action_result: Optional result message from container action
-        
-    Returns:
-        str: Formatted notification title
-    """
-    title = ""
-    keywords_found = message_config.get("keywords_found", "")
-    title_template = message_config.get("title_template")
-    notification_title = message_config.get("notification_title", "default").strip()
-    unit_name = message_config.get("unit_name", "").strip() or ""
-    template_fields = {}
-    template = None
-    if title_template:
-        template_fields = get_template_fields(message_config, log_line)
-        template = title_template
-    elif notification_title and notification_title.lower() != "default":
-        template = notification_title
-    if template:
-        try:
-            keywords = ', '.join(f"'{word}'" for word in keywords_found)
-            new_template_fields = {
-                "container": unit_name,
-                "keywords": keywords, 
-                "keyword": keywords, 
-            }
-            for key, value in new_template_fields.items():
-                if key in template_fields:
-                    continue
-                template_fields[key] = value
-            safe_dict = SafeDict(template_fields)
-            title = template.format_map(safe_dict)
-            if safe_dict.missing_keys:
-                logging.warning(f"Missing keys in template for title: {safe_dict.missing_keys}")
-            # logging.debug(f"Successfully applied this template to the notification title: {title}")
-        except KeyError as e:
-            logging.error(f"Missing key in template: {title}. You can only put these keys in the template: 'container, keywords'. Error: {e}")
-        except Exception as e:
-            logging.error(f"Error trying to apply this template for the notification title: {title} {e}")
-
-    # Generate default title if no template or template failed
-    if not title and isinstance(keywords_found, list):
-        if len(keywords_found) == 1:
-            keyword = keywords_found[0]
-            title = f"'{keyword}' found in {unit_name}"
-        elif len(keywords_found) == 2:
-            joined_keywords = ' and '.join(f"'{word}'" for word in keywords_found)
-            title = f"{joined_keywords} found in {unit_name}"
-        elif len(keywords_found) > 2:
-            joined_keywords = ', '.join(f"'{word}'" for word in keywords_found)
-            title = f"The following keywords were found in {unit_name}: {joined_keywords}"
-
-    # Fallback title
-    if not title:
-        title = f"{unit_name}: {keywords_found}"
-        
-    # Append action result if available
-    if action_result is not None:
-        title = f"{title} ({action_result})"
-
-    return title
-
-
-def message_from_template(keyword_dict, log_line):
-    """
-    Format a message using a template:
-    'json_template' and 'template' are legacy templates. 
-    The new 'message_template' handles both JSON and regex named capturing groups.
-    - For 'json_template', parse the log line as JSON and fill the template with its fields.
-    - For 'template' with 'regex', use named capturing groups from the regex to fill the template.
-    'original_log_line' is always available in the template context.
-    """
-    message = log_line
-    template = None
-    template_fields = {}
-    if keyword_dict.get("json_template"):
-        template_fields = get_template_fields(keyword_dict, log_line, mode="json")
-        template = keyword_dict.get("json_template")
-    elif keyword_dict.get("regex") and keyword_dict.get("template"):
-        template_fields = get_template_fields(keyword_dict, log_line, mode="regex")
-        template = keyword_dict.get("template")
-    elif keyword_dict.get("message_template"):
-        template_fields = get_template_fields(keyword_dict, log_line)
-        template = keyword_dict.get("message_template")
-    if not template:
-        return log_line
-    template_fields["original_log_line"] = log_line if not template_fields.get("original_log_line") else template_fields["original_log_line"]
-    safe_dict = SafeDict(template_fields)
-    message = template.format_map(safe_dict)
-    if safe_dict.missing_keys:
-        logging.warning(f"Missing keys in template: {safe_dict.missing_keys}")
-    logging.debug(f"Successfully applied this template to the message: {template}")
-    return message
+        return self.monitor_instance.tail_logs(self.unit_context.container_id, lines=lines)

@@ -244,7 +244,7 @@ def prettify_config_dict(data):
     """
     if isinstance(data, dict):
         # Put regex/keyword keys first for better readability
-        priority_keys = [k for k in ("regex", "keyword") if k in data]
+        priority_keys = [k for k in ("regex", "keyword", "keyword_group", "event") if k in data]
         if priority_keys:
             rest_keys = [k for k in data.keys() if k not in priority_keys]
             ordered_dict = {k: data[k] for k in priority_keys + rest_keys}
@@ -278,8 +278,29 @@ def convert_legacy_formats(config):
             elif isinstance(item, dict):
                 item[new_key] = new_value
                 new.append(item)
-    
+                
+    def _migrate_field_names(config_copy: dict, old: str, new: str, exclude_values: list[str] = []) -> dict:
+        keys_to_migrate = []
+        for key, value in config_copy.items():
+            if key == old and new not in config_copy and value not in exclude_values:
+                keys_to_migrate.append(key)
+            elif isinstance(value, dict):
+                _migrate_field_names(value, old, new, exclude_values)
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        _migrate_field_names(item, old, new, exclude_values)
+
+        # Now perform the migration
+        for key in keys_to_migrate:
+            config_copy[new] = config_copy.pop(key)
+
+        return config_copy
+        
     config_copy = copy.deepcopy(config)
+    config_copy = _migrate_field_names(config_copy, "notification_title", "title_template", exclude_values=["default"])
+    config_copy = _migrate_field_names(config_copy, "json_template", "message_template")
+    config_copy = _migrate_field_names(config_copy, "template", "message_template")
     
     # Migrate global keywords_with_attachment
     global_kw = config_copy.get("global_keywords", {})

@@ -49,7 +49,6 @@ def create_handle_signal(monitor_instances, config, config_observer):
     def handle_signal(signum, frame):
         if not config.settings.disable_shutdown_message:
             send_notification(config=config,
-                            unit_name= "LoggiFly",
                             title="LoggiFly", 
                             message="Shutting down")
         if config_observer is not None:
@@ -155,7 +154,6 @@ class ConfigHandler(FileSystemEventHandler):
         if self.config.settings.disable_config_reload_message is False:
             send_notification(
                 config=self.config,
-                unit_name="LoggiFly",
                 title="LoggiFly: The config file was reloaded",
                 message=message
             )
@@ -370,7 +368,6 @@ def start_loggifly():
     if config.settings.disable_start_message is False:
         send_notification(
             config=config,
-            unit_name="LoggiFly",
             title="LoggiFly started",
             message=message
         )
