@@ -9,7 +9,7 @@ from typing import Dict, Optional, List, Any, TYPE_CHECKING
 from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE
 
 if TYPE_CHECKING:
-    from docker_monitor import MonitoredContainerContext
+    from docker_monitoring.monitor import MonitoredContainerContext
 
 logger = logging.getLogger(__name__)
 

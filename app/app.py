@@ -17,7 +17,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from config.load_config import load_config, format_pydantic_error, ConfigLoadError
-from docker_monitor import DockerLogMonitor
+from docker_monitoring.monitor import DockerLogMonitor
 from notifier import send_notification
 
 logging.basicConfig(
