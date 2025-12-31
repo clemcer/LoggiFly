@@ -9,11 +9,15 @@ from pydantic import (
 )
 from typing import Literal
 from enum import Enum
-from constants import Actions
+from constants import Actions, MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS
 from typing import List, Optional, Union, ClassVar, Annotated, Any
 import logging
 import re
 import copy
+
+
+SUPPORTED_CONTAINER_ACTIONS: tuple[str, ...] = tuple(action.value for action in Actions)
+SUPPORTED_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
 
 
 class BaseConfigModel(BaseModel):
@@ -80,7 +84,7 @@ class Settings(BaseConfigModel):
     # modular settings:
     attach_logfile: bool = False
     notification_cooldown: int = 5
-    notification_title: Optional[str] = None # legacy
+    # notification_title: Optional[str] = None # legacy
     title_template: Optional[str] = None
     message_template: Optional[str] = None
     action_cooldown: Optional[int] = 300
@@ -120,7 +124,7 @@ class ModularSettings(BaseConfigModel):
 
     attachment_lines: Optional[int] = None
     notification_cooldown: Optional[int] = None
-    notification_title: Optional[str] = None # legacy
+    # notification_title: Optional[str] = None # legacy
     title_template: Optional[str] = None
     message_template: Optional[str] = None
     action_cooldown: Optional[int] = None
@@ -182,30 +186,21 @@ class OliveTinAction(BaseConfigModel):
 
 class KeywordItemBase(ModularSettings):
     """Base class for keyword items with common fields for actions and templates."""
-    json_template: Optional[str] = None # legacy
+    # json_template: Optional[str] = None # legacy
     action: Optional[str] = None
     olivetin_actions: Optional[List[OliveTinAction]] = None
 
     @field_validator("action")
     def validate_action(cls, v):
         """Validate action against available actions enum."""
-        if v and not any(a.value == v.split('@')[0] for a in Actions):
+        if v and v.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
             return None
         return v    
     
     @model_validator(mode="before")
     def validate_olivetin(cls, data: dict) -> dict:
-        if "olivetin_actions" in data and isinstance(data["olivetin_actions"], list):
-            for action in data["olivetin_actions"]:
-                if not isinstance(action, dict) or "id" not in action:
-                    logging.warning("OliveTin Action: id must be a string. Ignoring.")
-                    continue
-                action["id"] = str(action["id"])
-        if data.get("olivetin_action_id"):
-            data.setdefault("olivetin_actions", []).append({
-                "id": data["olivetin_action_id"],
-            })
-            data.pop("olivetin_action_id")
+        if data and isinstance(data, dict):
+            return validate_and_filter_olivetin_actions(data)
         return data
 
 class RegexItem(KeywordItemBase):
@@ -214,7 +209,7 @@ class RegexItem(KeywordItemBase):
     Template allows for notification formatting using named capturing groups.
     """
     regex: str
-    template: Optional[str] = None # legacy
+    # template: Optional[str] = None # legacy
 
 class KeywordItem(KeywordItemBase):
     """
@@ -263,7 +258,7 @@ class KeywordBase(BaseModel):
                         if key == "action":
                             if (not isinstance(item["action"], str) 
                             or not 0 < len(item["action"].split('@')) < 3 
-                            or not any(action.value in item["action"].split('@')[0] for action in Actions)):
+                            or item["action"].split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS):
                                 logging.warning(f"Ignoring Error in config in field {get_kw_or_rgx(item)}: Invalid action: '{item['action']}'.")
                                 item["action"] = None
                             elif cls._DISALLOW_ACTION and len(item["action"].split('@')) < 2:
@@ -282,17 +277,40 @@ class KeywordBase(BaseModel):
         return data
 
 
+# class ContainerEventConfig(ModularSettings):
+#     event: Literal[*SUPPORTED_EVENTS] # type: ignore
+#     action: Optional[str] = None
+#     olivetin_actions: Optional[List[OliveTinAction]] = None
+
+#     @model_validator(mode="before")
+#     def validate_olivetin(cls, data: dict) -> dict:
+#         if data and isinstance(data, dict):
+#             return validate_and_filter_olivetin_actions(data)
+#         return data
+
+#     @field_validator("action")
+#     def validate_action(cls, v):
+#         """Validate action against available actions enum."""
+#         if v and v.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
+#             return None
+#         return v    
+
+
 class ContainerConfig(KeywordBase, ModularSettings):    
     """
     Model for per-container configuration, including keywords and setting overrides.
     Allows targeting specific hosts when multiple Docker hosts are configured.
     """
     hosts: Optional[str] = None
-
+    # events: Optional[List[ContainerEventConfig]] = None
+    
     @field_validator("ntfy_priority", mode="before")
     def validate_priority(cls, v):
         return validate_priority(v)
 
+    # @field_validator("events", mode="before")
+    # def validate_events(cls, v):
+    #     return validate_events(v)
 
 class SwarmServiceConfig(KeywordBase, ModularSettings):
     """
@@ -301,7 +319,11 @@ class SwarmServiceConfig(KeywordBase, ModularSettings):
     """
     _DISALLOW_ACTION: ClassVar[bool] = True
     hosts: Optional[str] = None
+    # events: Optional[List[ContainerEventConfig]] = None
 
+    @field_validator("events", mode="before")
+    def validate_events(cls, v):
+        return validate_events(v)
 
 class GlobalKeywords(BaseConfigModel, KeywordBase):
     """Global keyword configuration that applies to all monitored containers."""
@@ -478,6 +500,21 @@ def validate_priority(v):
             return 3
     return v
 
+def validate_and_filter_olivetin_actions(data: dict) -> dict:
+    if not data:
+        return data
+    if "olivetin_actions" in data and isinstance(data["olivetin_actions"], list):
+        for action in data["olivetin_actions"]:
+            if not isinstance(action, dict) or "id" not in action:
+                logging.warning("OliveTin Action: id must be a string. Ignoring.")
+                continue
+            action["id"] = str(action["id"])
+    if data.get("olivetin_action_id"):
+        data.setdefault("olivetin_actions", []).append({
+            "id": data["olivetin_action_id"],
+        })
+        data.pop("olivetin_action_id")
+    return data
 
 def validate_regex(v):
     """
@@ -503,6 +540,25 @@ def get_kw_or_rgx(item):
         elif "keyword_group" in item:
             return f"keyword_group: '{item['keyword_group']}'"
     return "unknown"
+
+def validate_events(v):
+    if not v:
+        return v
+    converted = []
+    if v and isinstance(v, list):
+        for event in v:
+            if not isinstance(event, dict) or "event" not in event:
+                logging.warning(f"Ignoring Error in config in field 'events': '{event}' is not a dict or does not have an 'event' key.")
+                continue
+            if event["event"] not in SUPPORTED_EVENTS:
+                logging.warning(f"Ignoring Error in config in field 'events': '{event['event']}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                continue
+            converted.append(event)
+    else:
+        logging.warning("Events: expected a list, got %r – ignoring", v)
+        return None
+    return converted
+
 
 def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
     possible_actions = ["http", "broadcast", "view"]

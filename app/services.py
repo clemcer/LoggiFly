@@ -1,7 +1,6 @@
 import requests
 import logging
 import threading
-from config.config_model import GlobalConfig
 from pydantic import SecretStr
 
 logger = logging.getLogger(__name__)
@@ -75,12 +74,12 @@ class OlivetinAction:
                 cookies={"olivetin-sid-local": auth_cookie}
             )
             if response.status_code != 200:
-                logger.error(f"You are not logged in to Olivetin: {response.status_code} - {response.text}")
+                logger.info(f"Olivetin cookie is not valid: {response.status_code} - {response.text}")
                 return False
             
             return True
         except Exception as e:
-            logger.error(f"You are not logged in to Olivetin: {e}")
+            logger.error(f"Error checking if Olivetin cookie is valid: {e}")
             return False
         
     def trigger_action(self, url, action_id, arguments=None, username=None, password=None) -> dict | None:
@@ -123,24 +122,25 @@ class OlivetinAction:
 _olivetin_action = None
 
 
-def perform_olivetin_action(config: GlobalConfig, message_config: dict, config_dict: dict) -> tuple[str, str]:
+def perform_olivetin_action(
+    url: str,
+    username: str,
+    password: str | SecretStr,
+    olivetin_action_config: dict,
+) -> tuple[str, str]:
     """
     Perform an OliveTin action.
 
     Returns:
         tuple: (notification_title, notification_message) describing the action result
     """
-    # Get configuration with precedence: message_config > global_config
-    url = message_config.get("olivetin_url", "").strip() or config.settings.olivetin_url or None
-    username = message_config.get("olivetin_username", "").strip() or config.settings.olivetin_username or None
-    password = message_config.get("olivetin_password", "").strip() or config.settings.olivetin_password or None
     if password and isinstance(password, SecretStr):
         password = password.get_secret_value()
-    action_id = config_dict.get("id")
+    action_id = olivetin_action_config.get("id")
     if not action_id:
         logger.error("No action ID provided")
         return "Olivetin Action Failed", "Olivetin Action failed with no action ID"
-    arguments = config_dict.get("arguments")
+    arguments = olivetin_action_config.get("arguments")
     global _olivetin_action
     
     if _olivetin_action is None:
@@ -165,3 +165,48 @@ def perform_olivetin_action(config: GlobalConfig, message_config: dict, config_d
         title = f"Olivetin action '{action_icon} {action_title}' failed"
     return title, message
 
+def trigger_olivetin_action(
+    settings: dict,
+    action_cfg: dict,
+    logger: logging.Logger,
+    *,
+    send_notification_cb=None,
+    disable_notifications: bool | None = None,
+):
+    """
+    Run an OliveTin action in a background thread using merged settings.
+
+    Args:
+        settings: merged settings containing olivetin_url/username/password (+ optional disable_notifications).
+        action_cfg: OliveTin action dict (id, arguments).
+        logger: logger instance for diagnostics.
+        send_notification_cb: callable(title, message) to emit a notification (optional).
+        disable_notifications: explicit override; defaults to settings["disable_notifications"].
+    """
+    url = (settings or {}).get("olivetin_url")
+    username = (settings or {}).get("olivetin_username")
+    password = (settings or {}).get("olivetin_password")
+    disable = disable_notifications if disable_notifications is not None else (settings or {}).get("disable_notifications") or False
+
+    if not url or not username or not password:
+        logger.error("Could not start OliveTin action because URL, username or password is not set.")
+        return None
+
+    def _run_action():
+        try:
+            result = perform_olivetin_action(url, username, password, action_cfg)
+        except Exception as e:
+            logger.error("Olivetin action failed: %s", e)
+            return
+        if not result:
+            return
+        title, message = result
+        if send_notification_cb and not disable:
+            try:
+                send_notification_cb(title, message)
+            except Exception as e:
+                logger.error("Failed to send notification for Olivetin action: %s", e)
+
+    thread = threading.Thread(target=_run_action, daemon=True)
+    thread.start()
+    return thread
