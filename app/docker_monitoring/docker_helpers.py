@@ -1,3 +1,4 @@
+from config.config_model import GlobalConfig
 from constants import MonitorLabelDecision
 from dataclasses import dataclass
 import re
@@ -25,12 +26,6 @@ class ContainerSnapshot:
 
     @property
     def is_swarm_service(self) -> bool:
-        """
-        Whether this snapshot represents a swarm service container.
-
-        Note: If True, service_name is guaranteed to be a non-empty string
-        (Docker ensures service names are non-empty when service ID exists).
-        """
         return self.service_name is not None
 
     @property
@@ -48,13 +43,6 @@ class ContainerSnapshot:
     def from_container(cls, container, client) -> 'ContainerSnapshot':
         """
         Extract minimal metadata from a Docker container object.
-
-        Args:
-            container: Docker container object
-            client: Docker client (needed to fetch service info)
-
-        Returns:
-            ContainerSnapshot with all relevant metadata
         """
         service_info = get_service_info(container, client)
         if service_info:
@@ -73,44 +61,30 @@ class ContainerSnapshot:
             labels=container.labels or {}
         )
 
-    @classmethod
-    def from_event(cls, event: dict) -> 'ContainerSnapshot':
-        """
-        Create snapshot from Docker event.
-
-        Useful for notifications when container is destroyed or not in monitoring registry.
-        Docker events contain container metadata in the Actor.Attributes field.
-
-        Args:
-            event: Docker event dictionary
-
-        Returns:
-            ContainerSnapshot with metadata extracted from event
-        """
-        attrs = event.get('Actor', {}).get('Attributes', {})
-        container_id = event.get('id', '')
-
-        # Get container name from attributes or use short ID as fallback
-        container_name = attrs.get('name', container_id[:12] if container_id else 'unknown')
-
-        # Check if this is a swarm service container
-        service_id = attrs.get('com.docker.swarm.service.id')
-        if service_id:
-            return cls(
-                name=container_name,
-                id=container_id,
-                labels=attrs,
-                service_name=attrs.get('com.docker.swarm.service.name'),
-                stack_name=attrs.get('com.docker.stack.namespace'),
-                service_labels={}  # Not available in events
-            )
-        else:
-            return cls(
-                name=container_name,
-                id=container_id,
-                labels=attrs
-            )
-
+def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list[str]]:
+    selected_containers = []
+    selected_swarm_services = []
+    host_config = config.hosts.get(hostname) if isinstance(config.hosts, dict) and hostname else None
+    containers = dict(config.containers or {})
+    if host_config:
+        containers.update(host_config.containers or {})    
+    swarm_services = config.swarm_services or {}
+    
+    configs_to_check = [
+        (containers, selected_containers),
+        (swarm_services, selected_swarm_services),
+    ]
+    for (objects_in_config, selected) in configs_to_check:
+        if not objects_in_config:
+            continue
+        for object_name in objects_in_config:
+            config_object = objects_in_config[object_name]
+            if hostname and config_object.hosts is not None:
+                hostnames = config_object.hosts.split(",")
+                if all(hn.strip() != hostname for hn in hostnames):
+                    continue
+            selected.append(object_name)
+    return selected_containers, selected_swarm_services
 
 def check_monitor_label(labels) -> MonitorLabelDecision:
     """Extract and check the 'loggifly.monitor' label value."""
@@ -148,7 +122,7 @@ def get_service_unit_name(labels) -> str | None:
     """
     task_id = labels.get("com.docker.swarm.task.id")
     task_name = labels.get("com.docker.swarm.task.name")
-    service_name = labels.get("com.docker.swarm.service.name", "")#
+    service_name = labels.get("com.docker.swarm.service.name", "")
     stack_name = labels.get("com.docker.stack.namespace", "")
     if not any([service_name, task_id, task_name]):
         return None
