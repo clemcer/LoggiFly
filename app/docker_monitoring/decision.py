@@ -1,3 +1,4 @@
+from app.config.config_model import ContainerConfig
 from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING
@@ -15,32 +16,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 class MonitorDecision:
-    """
-    Encapsulates the decision of whether to monitor a container and with what configuration.
-
-    Separates decision logic from Docker monitor orchestration, making it:
-    - Testable in isolation (no Docker objects required)
-    - Reusable for initial setup and config reload
-    - Clear about why decisions were made (via reason field)
-
-    The `config` field contains a ContainerConfig object when result is MONITOR.
-    For config reloads with unchanged label-based configs, a fresh ContainerConfig
-    is created from the existing context to maintain separation of concerns between
-    configuration data and monitoring state.
-
-    Usage:
-        # Initial container discovery
-        snapshot = ContainerSnapshot.from_container(container, client)
-        decision = MonitorDecision.evaluate(snapshot, config, ...)
-        if decision.should_monitor:
-            start_monitoring(decision.config)
-
-        # Config reload
-        decision = MonitorDecision.evaluate_for_reload(ctx, new_config, ...)
-        if decision.should_stop:
-            stop_monitoring(ctx)
-    """
-
     class Result(Enum):
         """Possible monitoring decision outcomes."""
         MONITOR = "monitor"              # Start or continue monitoring
@@ -84,53 +59,21 @@ class MonitorDecision:
         snapshot: ContainerSnapshot,
         global_config: GlobalConfig,
         hostname: str,  # For future multi-host filtering
-        containers_config: dict,  # Host-filtered container configs
-        selected_containers: list[str],
-        selected_swarm_services: list[str],
-        monitor_all_containers: bool,
-        monitor_all_swarm_services: bool,
-        excluded_containers: list[str],
-        excluded_swarm_services: list[str],
         skip_labels: bool = False,
     ) -> 'MonitorDecision':
         """
         Decide if a container should be monitored based on labels, config, and settings.
-
-        This is the main entry point for initial container discovery.
 
         Decision precedence:
         1. Labels (if not skip_labels): loggifly.monitor=true/false
         2. Explicit config: containers.{name} or swarm_services.{name}
         3. Global settings: monitor_all_containers/monitor_all_swarm_services
         4. Exclusions: excluded_containers/excluded_swarm_services
-
-        Args:
-            snapshot: Container metadata snapshot
-            global_config: Global configuration object
-            hostname: Host identifier (for multi-host setups, reserved for future use)
-            containers_config: Host-filtered container configs dict
-            selected_containers: List of container names in config
-            selected_swarm_services: List of swarm service names in config
-            monitor_all_containers: Whether to monitor all containers by default
-            monitor_all_swarm_services: Whether to monitor all swarm services by default
-            excluded_containers: List of container names to exclude
-            excluded_swarm_services: List of swarm service names to exclude
-            skip_labels: If True, ignore container labels (used during config reload)
-
-        Returns:
-            MonitorDecision with result, config (if monitoring), and reason
-
-        Raises:
-            ValueError: If label-based config validation fails
         """
         if snapshot.is_swarm_service:
             return cls._evaluate_swarm(
                 snapshot=snapshot,
                 global_config=global_config,
-                hostname=hostname,
-                selected_swarm_services=selected_swarm_services,
-                monitor_all_swarm_services=monitor_all_swarm_services,
-                excluded_swarm_services=excluded_swarm_services,
                 skip_labels=skip_labels,
             )
         else:
@@ -138,10 +81,6 @@ class MonitorDecision:
                 snapshot=snapshot,
                 global_config=global_config,
                 hostname=hostname,
-                containers_config=containers_config,
-                selected_containers=selected_containers,
-                monitor_all_containers=monitor_all_containers,
-                excluded_containers=excluded_containers,
                 skip_labels=skip_labels,
             )
 
@@ -150,70 +89,48 @@ class MonitorDecision:
         cls,
         ctx: 'MonitoredContainerContext',
         new_config: GlobalConfig,
-        containers_config: dict,  # Host-filtered container configs
-        selected_containers: list[str],
-        selected_swarm_services: list[str],
-        monitor_all_containers: bool,
-        monitor_all_swarm_services: bool,
-        excluded_containers: list[str],
-        excluded_swarm_services: list[str],
+        hostname: str,
     ) -> 'MonitorDecision':
         """
         Decide if a currently monitored container should continue being monitored.
 
         Used during config reload to determine if monitoring should stop or continue
         with updated configuration.
-
-        Args:
-            ctx: Current container monitoring context
-            new_config: Newly loaded configuration
-            containers_config: Host-filtered container configs dict
-            selected_containers: Container names in new config
-            selected_swarm_services: Swarm service names in new config
-            monitor_all_containers: New monitor_all_containers setting
-            monitor_all_swarm_services: New monitor_all_swarm_services setting
-            excluded_containers: New exclusion list
-            excluded_swarm_services: New swarm exclusion list
-
-        Returns:
-            MonitorDecision with:
-            - STOP_MONITORING if monitoring should stop
-            - MONITOR with updated config if monitoring should continue
         """
         if ctx.monitor_type == MonitorType.CONTAINER:
             return cls._evaluate_container_for_reload(
                 ctx=ctx,
                 new_config=new_config,
-                containers_config=containers_config,
-                selected_containers=selected_containers,
-                monitor_all_containers=monitor_all_containers,
-                excluded_containers=excluded_containers,
+                hostname=hostname,
             )
         else:  # MonitorType.SWARM
             return cls._evaluate_swarm_for_reload(
                 ctx=ctx,
                 new_config=new_config,
-                selected_swarm_services=selected_swarm_services,
-                monitor_all_swarm_services=monitor_all_swarm_services,
-                excluded_swarm_services=excluded_swarm_services,
             )
+    @staticmethod
+    def _get_container_settings_for_host(global_config: GlobalConfig, hostname: str):
+        """Extract host-specific container settings."""
+        host_config = global_config.hosts.get(hostname) if isinstance(global_config.hosts, dict) and hostname else None
+        containers = dict(global_config.containers or {})  # Create copy!
+
+        if host_config:
+            monitor_all_containers = host_config.monitor_all_containers if host_config.monitor_all_containers is not None else global_config.settings.monitor_all_containers
+            excluded_containers = host_config.excluded_containers or global_config.settings.excluded_containers or []
+            containers.update(host_config.containers or {})
+        else:
+            monitor_all_containers = global_config.settings.monitor_all_containers
+            excluded_containers = global_config.settings.excluded_containers or []
+
+        return containers, monitor_all_containers, excluded_containers
 
     @classmethod
     def _evaluate_swarm(
         cls,
         snapshot: ContainerSnapshot,
         global_config: GlobalConfig,
-        hostname: str,
-        selected_swarm_services: list[str],
-        monitor_all_swarm_services: bool,
-        excluded_swarm_services: list[str],
         skip_labels: bool,
     ) -> 'MonitorDecision':
-        """
-        Evaluate monitoring decision for a swarm service container.
-
-        This is a direct port of _should_monitor_swarm() logic.
-        """
         service_name = snapshot.service_name
         stack_name = snapshot.stack_name
         unit_name = snapshot.unit_name
@@ -263,22 +180,25 @@ class MonitorDecision:
                 reason=f"label says loggifly.monitor=false ({label_source})"
             )
 
+        monitor_all_swarm_services = global_config.settings.monitor_all_swarm_services
+        excluded_swarm_services = global_config.settings.excluded_swarm_services or []
+        swarm_services = global_config.swarm_services or {}
         # Check explicit config
-        if global_config.swarm_services:
-            if service_name in selected_swarm_services:
-                unit_config = global_config.swarm_services[service_name]
+        if swarm_services:
+            if service_name in swarm_services:
+                unit_config = swarm_services[service_name]
                 return cls(
                     result=cls.Result.MONITOR,
-                    reason=f"monitored via config.yaml (swarm_services.{service_name})",
+                    reason=f"monitored via config.yaml",
                     config_key=service_name,
                     unit_config=unit_config,
                     config_via_labels=False
                 )
-            if stack_name and stack_name in selected_swarm_services:
-                unit_config = global_config.swarm_services[stack_name]
+            if stack_name and stack_name in swarm_services:
+                unit_config = swarm_services[stack_name]
                 return cls(
                     result=cls.Result.MONITOR,
-                    reason=f"monitored via config.yaml (swarm_services.{stack_name})",
+                    reason=f"monitored via config.yaml",
                     config_key=stack_name,
                     unit_config=unit_config,
                     config_via_labels=False
@@ -311,17 +231,8 @@ class MonitorDecision:
         snapshot: ContainerSnapshot,
         global_config: GlobalConfig,
         hostname: str,
-        containers_config: dict,
-        selected_containers: list[str],
-        monitor_all_containers: bool,
-        excluded_containers: list[str],
         skip_labels: bool,
     ) -> 'MonitorDecision':
-        """
-        Evaluate monitoring decision for a regular container.
-
-        This is a direct port of _should_monitor_container() logic.
-        """
         cname = snapshot.name
         cid = snapshot.id
 
@@ -353,13 +264,18 @@ class MonitorDecision:
                 result=cls.Result.SKIP,
                 reason="label says loggifly.monitor=false"
             )
-
+        containers, monitor_all_containers, excluded_containers = cls._get_container_settings_for_host(global_config, hostname)
         # Check explicit config
-        if cname in selected_containers:
-            unit_config = containers_config[cname]
+        if cname in containers:
+            unit_config = containers[cname]
+            if hostname and unit_config.hosts and not any(hn.strip() == hostname for hn in unit_config.hosts.split(",")):
+                return cls(
+                    result=cls.Result.SKIP,
+                    reason=f"container {cname} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this container."
+                )
             return cls(
                 result=cls.Result.MONITOR,
-                reason=f"monitored via config.yaml (containers.{cname})",
+                reason=f"monitored via config.yaml",
                 config_key=cname,
                 unit_config=unit_config,
                 config_via_labels=False
@@ -391,16 +307,8 @@ class MonitorDecision:
         cls,
         ctx: 'MonitoredContainerContext',
         new_config: GlobalConfig,
-        containers_config: dict,
-        selected_containers: list[str],
-        monitor_all_containers: bool,
-        excluded_containers: list[str],
+        hostname: str,
     ) -> 'MonitorDecision':
-        """
-        Evaluate if a currently monitored container should continue during config reload.
-
-        This is a port of the reload_config() logic for containers.
-        """
         # Label-based configs are not affected by config reloads
         if ctx.config_via_labels:
             return cls(
@@ -410,7 +318,7 @@ class MonitorDecision:
                 unit_config=ctx.unit_config,
                 config_via_labels=ctx.config_via_labels
             )
-
+        containers, monitor_all_containers, excluded_containers = cls._get_container_settings_for_host(new_config, hostname)
         # Check if excluded
         if monitor_all_containers:
             if ctx.config_key in excluded_containers:
@@ -418,16 +326,30 @@ class MonitorDecision:
                     result=cls.Result.STOP_MONITORING,
                     reason="excluded via excluded_containers"
                 )
+            return cls(
+                result=cls.Result.MONITOR,
+                reason="monitored via monitor_all_containers setting",
+                config_key=ctx.config_key,
+                unit_config=ModelContainerConfig(),
+                config_via_labels=False
+            )
         else:
             # Not monitor_all - must be explicitly in config
-            if ctx.config_key not in selected_containers:
+            if ctx.config_key not in containers:
                 return cls(
                     result=cls.Result.STOP_MONITORING,
                     reason="not present in current config"
                 )
+            else:
+                unit_config = containers[ctx.config_key]
+                if hostname and unit_config.hosts and not any(hn.strip() == hostname for hn in unit_config.hosts.split(",")):
+                    return cls(
+                        result=cls.Result.STOP_MONITORING,
+                        reason=f"container {ctx.config_key} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Stopping monitoring for this container."
+                    )
 
         # Still should be monitored - get updated config
-        unit_config = containers_config.get(ctx.config_key) if containers_config else None
+        unit_config = containers.get(ctx.config_key)
         if unit_config is None:
             # This shouldn't happen but handle gracefully
             return cls(
@@ -448,15 +370,7 @@ class MonitorDecision:
         cls,
         ctx: 'MonitoredContainerContext',
         new_config: GlobalConfig,
-        selected_swarm_services: list[str],
-        monitor_all_swarm_services: bool,
-        excluded_swarm_services: list[str],
     ) -> 'MonitorDecision':
-        """
-        Evaluate if a currently monitored swarm service should continue during config reload.
-
-        This is a port of the reload_config() logic for swarm services.
-        """
         # Label-based configs are not affected by config reloads
         if ctx.config_via_labels:
             return cls(
@@ -467,6 +381,10 @@ class MonitorDecision:
                 config_via_labels=ctx.config_via_labels
             )
 
+        monitor_all_swarm_services = new_config.settings.monitor_all_swarm_services
+        excluded_swarm_services = new_config.settings.excluded_swarm_services or []
+        swarm_services = new_config.swarm_services or {}
+
         # Check if excluded
         if monitor_all_swarm_services:
             if any(n in excluded_swarm_services for n in [ctx.config_key, ctx.unit_name]):
@@ -474,16 +392,23 @@ class MonitorDecision:
                     result=cls.Result.STOP_MONITORING,
                     reason="excluded via excluded_swarm_services"
                 )
+            return cls(
+                result=cls.Result.MONITOR,
+                reason="monitored via monitor_all_swarm_services setting",
+                config_key=ctx.config_key,
+                unit_config=ModelSwarmServiceConfig(),
+                config_via_labels=False
+            )
         else:
             # Not monitor_all - must be explicitly in config
-            if ctx.config_key not in selected_swarm_services:
+            if ctx.config_key not in swarm_services:
                 return cls(
                     result=cls.Result.STOP_MONITORING,
                     reason="not present in current config"
                 )
 
         # Still should be monitored - get updated config
-        unit_config = new_config.swarm_services.get(ctx.config_key) if new_config.swarm_services else None
+        unit_config = swarm_services.get(ctx.config_key)
         if unit_config is None:
             return cls(
                 result=cls.Result.STOP_MONITORING,
