@@ -104,6 +104,44 @@ class ContainerSnapshot:
             labels=container.labels or {}
         )
 
+    @classmethod
+    def from_event(cls, event: dict) -> 'ContainerSnapshot':
+        """
+        Create snapshot from Docker event.
+
+        Useful for notifications when container is destroyed or not in monitoring registry.
+        Docker events contain container metadata in the Actor.Attributes field.
+
+        Args:
+            event: Docker event dictionary
+
+        Returns:
+            ContainerSnapshot with metadata extracted from event
+        """
+        attrs = event.get('Actor', {}).get('Attributes', {})
+        container_id = event.get('id', '')
+
+        # Get container name from attributes or use short ID as fallback
+        container_name = attrs.get('name', container_id[:12] if container_id else 'unknown')
+
+        # Check if this is a swarm service container
+        service_id = attrs.get('com.docker.swarm.service.id')
+        if service_id:
+            return cls(
+                name=container_name,
+                id=container_id,
+                labels=attrs,
+                service_name=attrs.get('com.docker.swarm.service.name'),
+                stack_name=attrs.get('com.docker.stack.namespace'),
+                service_labels={}  # Not available in events
+            )
+        else:
+            return cls(
+                name=container_name,
+                id=container_id,
+                labels=attrs
+            )
+
 
 class MonitorDecision:
     """
@@ -139,18 +177,25 @@ class MonitorDecision:
         NOT_CONFIGURED = "not_configured"  # Not in config, monitor_all disabled
         STOP_MONITORING = "stop"         # Currently monitored but should stop (reload)
 
-    def __init__(self, result: 'MonitorDecision.Result', config: 'ContainerConfig | None' = None, reason: str = ""):
+    def __init__(self, result: 'MonitorDecision.Result', reason: str = "",
+                 config_key: str | None = None,
+                 unit_config: 'ModelContainerConfig | ModelSwarmServiceConfig | None' = None,
+                 config_via_labels: bool | None = None):
         """
         Initialize a monitoring decision.
 
         Args:
             result: The decision outcome
-            config: Container configuration (only set if result == MONITOR)
             reason: Human-readable explanation of why this decision was made
+            config_key: Configuration key (container/service name) - only set if result == MONITOR
+            unit_config: Unit configuration object - only set if result == MONITOR
+            config_via_labels: Whether config came from labels - only set if result == MONITOR
         """
         self.result = result
-        self.config = config
         self.reason = reason
+        self.config_key = config_key
+        self.unit_config = unit_config
+        self.config_via_labels = config_via_labels
 
     @property
     def should_monitor(self) -> bool:
@@ -334,11 +379,10 @@ class MonitorDecision:
                 )
             return cls(
                 result=cls.Result.MONITOR,
-                config=ContainerConfig(
-                    MonitorType.SWARM, service_name, unit_name, unit_config,
-                    snapshot.name, snapshot.id, config_via_labels=True
-                ),
-                reason=f"monitored via {label_source}"
+                reason=f"monitored via {label_source}",
+                config_key=service_name,
+                unit_config=unit_config,
+                config_via_labels=True
             )
 
         # Labels explicitly say skip
@@ -354,21 +398,19 @@ class MonitorDecision:
                 unit_config = global_config.swarm_services[service_name]
                 return cls(
                     result=cls.Result.MONITOR,
-                    config=ContainerConfig(
-                        MonitorType.SWARM, service_name, unit_name, unit_config,
-                        snapshot.name, snapshot.id, config_via_labels=False
-                    ),
-                    reason=f"monitored via config.yaml (swarm_services.{service_name})"
+                    reason=f"monitored via config.yaml (swarm_services.{service_name})",
+                    config_key=service_name,
+                    unit_config=unit_config,
+                    config_via_labels=False
                 )
             if stack_name and stack_name in selected_swarm_services:
                 unit_config = global_config.swarm_services[stack_name]
                 return cls(
                     result=cls.Result.MONITOR,
-                    config=ContainerConfig(
-                        MonitorType.SWARM, stack_name, unit_name, unit_config,
-                        snapshot.name, snapshot.id, config_via_labels=False
-                    ),
-                    reason=f"monitored via config.yaml (swarm_services.{stack_name})"
+                    reason=f"monitored via config.yaml (swarm_services.{stack_name})",
+                    config_key=stack_name,
+                    unit_config=unit_config,
+                    config_via_labels=False
                 )
 
         # Check monitor_all_swarm_services with exclusions
@@ -380,12 +422,10 @@ class MonitorDecision:
                 )
             return cls(
                 result=cls.Result.MONITOR,
-                config=ContainerConfig(
-                    MonitorType.SWARM, service_name, unit_name,
-                    ModelSwarmServiceConfig(),
-                    snapshot.name, snapshot.id, config_via_labels=False
-                ),
-                reason="monitored via monitor_all_swarm_services setting"
+                reason="monitored via monitor_all_swarm_services setting",
+                config_key=service_name,
+                unit_config=ModelSwarmServiceConfig(),
+                config_via_labels=False
             )
 
         # Not configured anywhere
@@ -430,11 +470,10 @@ class MonitorDecision:
                 )
             return cls(
                 result=cls.Result.MONITOR,
-                config=ContainerConfig(
-                    MonitorType.CONTAINER, cname, cname, unit_config,
-                    cname, cid, config_via_labels=True
-                ),
-                reason="monitored via container labels"
+                reason="monitored via container labels",
+                config_key=cname,
+                unit_config=unit_config,
+                config_via_labels=True
             )
 
         # Labels explicitly say skip
@@ -449,11 +488,10 @@ class MonitorDecision:
             unit_config = containers_config[cname]
             return cls(
                 result=cls.Result.MONITOR,
-                config=ContainerConfig(
-                    MonitorType.CONTAINER, cname, cname, unit_config,
-                    cname, cid, config_via_labels=False
-                ),
-                reason=f"monitored via config.yaml (containers.{cname})"
+                reason=f"monitored via config.yaml (containers.{cname})",
+                config_key=cname,
+                unit_config=unit_config,
+                config_via_labels=False
             )
 
         # Check monitor_all_containers with exclusions
@@ -465,12 +503,10 @@ class MonitorDecision:
                 )
             return cls(
                 result=cls.Result.MONITOR,
-                config=ContainerConfig(
-                    MonitorType.CONTAINER, cname, cname,
-                    ModelContainerConfig(),
-                    cname, cid, config_via_labels=False
-                ),
-                reason="monitored via monitor_all_containers setting"
+                reason="monitored via monitor_all_containers setting",
+                config_key=cname,
+                unit_config=ModelContainerConfig(),
+                config_via_labels=False
             )
 
         # Not configured anywhere
@@ -496,19 +532,12 @@ class MonitorDecision:
         """
         # Label-based configs are not affected by config reloads
         if ctx.config_via_labels:
-            # Return a fresh ContainerConfig with unchanged values
             return cls(
                 result=cls.Result.MONITOR,
-                config=ContainerConfig(
-                    monitor_type=ctx.monitor_type,
-                    config_key=ctx.config_key,
-                    unit_name=ctx.unit_name,
-                    unit_config=ctx.unit_config,
-                    container_name=ctx.container_name,
-                    container_id=ctx.container_id,
-                    config_via_labels=ctx.config_via_labels,
-                ),
-                reason="monitored via labels (unchanged)"
+                reason="monitored via labels (unchanged)",
+                config_key=ctx.config_key,
+                unit_config=ctx.unit_config,
+                config_via_labels=ctx.config_via_labels
             )
 
         # Check if excluded
@@ -537,12 +566,10 @@ class MonitorDecision:
 
         return cls(
             result=cls.Result.MONITOR,
-            config=ContainerConfig(
-                ctx.monitor_type, ctx.config_key, ctx.unit_name,
-                unit_config, ctx.container_name, ctx.container_id,
-                config_via_labels=False
-            ),
-            reason="config updated from config.yaml"
+            reason="config updated from config.yaml",
+            config_key=ctx.config_key,
+            unit_config=unit_config,
+            config_via_labels=False
         )
 
     @classmethod
@@ -561,19 +588,12 @@ class MonitorDecision:
         """
         # Label-based configs are not affected by config reloads
         if ctx.config_via_labels:
-            # Return a fresh ContainerConfig with unchanged values
             return cls(
                 result=cls.Result.MONITOR,
-                config=ContainerConfig(
-                    monitor_type=ctx.monitor_type,
-                    config_key=ctx.config_key,
-                    unit_name=ctx.unit_name,
-                    unit_config=ctx.unit_config,
-                    container_name=ctx.container_name,
-                    container_id=ctx.container_id,
-                    config_via_labels=ctx.config_via_labels,
-                ),
-                reason="monitored via labels (unchanged)"
+                reason="monitored via labels (unchanged)",
+                config_key=ctx.config_key,
+                unit_config=ctx.unit_config,
+                config_via_labels=ctx.config_via_labels
             )
 
         # Check if excluded
@@ -601,55 +621,50 @@ class MonitorDecision:
 
         return cls(
             result=cls.Result.MONITOR,
-            config=ContainerConfig(
-                ctx.monitor_type, ctx.config_key, ctx.unit_name,
-                unit_config, ctx.container_name, ctx.container_id,
-                config_via_labels=False
-            ),
-            reason="config updated from config.yaml"
+            reason="config updated from config.yaml",
+            config_key=ctx.config_key,
+            unit_config=unit_config,
+            config_via_labels=False
         )
 
 
-class ContainerConfig:
+class MonitoredContainerContext:
+    """
+    Runtime monitoring state for a container.
 
-    def __init__(self, monitor_type, 
-        config_key: str,
-        unit_name: str,
-        unit_config,
-        container_name: str,
-        container_id: str,
-        config_via_labels: bool = False,
-    ):
-        self.monitor_type = monitor_type  # MonitorType.CONTAINER or MonitorType.SWARM
-        self.config_key = config_key  # The key used in the configuration (for swawrm it can be stack or service name)
-        self.unit_name = unit_name  # Unique name for container/service (also if it is a swarm service container replica)
-        self.unit_config = unit_config  # The config for the unit in GlobalConfig
-        self.config_via_labels = config_via_labels  # True if the context was created from labels, False if it was created from config
-        self.container_name = container_name
-        self.container_id = container_id
+    Holds the container snapshot, monitoring configuration, and runtime state
+    (threads, events, processor, etc.).
+    """
 
-class MonitoredContainerContext(ContainerConfig):
+    def __init__(self, snapshot: ContainerSnapshot, config_key: str,
+                 unit_config, config_via_labels: bool):
+        """
+        Initialize monitoring context for a container.
 
-    def __init__(self, monitor_type, config_key, unit_name, container_name, container_id, unit_config, config_via_labels):
-        super().__init__(monitor_type, config_key, unit_name, unit_config, container_name, container_id, config_via_labels)
+        Args:
+            snapshot: Container metadata snapshot
+            config_key: Configuration key (container/service name)
+            unit_config: Unit configuration object
+            config_via_labels: Whether config came from Docker labels
+        """
+        self.snapshot = snapshot
+        self.config_key = config_key
+        self.unit_config = unit_config
+        self.config_via_labels = config_via_labels
+
+        # Derived from snapshot
+        self.monitor_type = MonitorType.SWARM if snapshot.is_swarm_service else MonitorType.CONTAINER
+        self.unit_name = snapshot.unit_name
+        self.container_name = snapshot.name
+        self.container_id = snapshot.id
+
+        # Runtime state
         self.generation = 0  # Used to track container restarts
         self.stop_monitoring_event = threading.Event()  # Signal to stop monitoring
         self.monitoring_stopped_event = threading.Event()  # Signal that the monitoring thread has stopped
         self.log_stream = None  # Will be set when the log stream is opened
         self.processor = None  # Will be set after initialization
         self.currently_configured = True
-
-    @classmethod
-    def from_container_config(cls, container_config):
-        return cls(
-            monitor_type=container_config.monitor_type,
-            config_key=container_config.config_key,
-            unit_name=container_config.unit_name,
-            container_name=container_config.container_name,
-            container_id=container_config.container_id,
-            unit_config=container_config.unit_config,
-            config_via_labels=container_config.config_via_labels,
-        )   
 
     def set_processor(self, processor):
         self.processor = processor
@@ -864,27 +879,38 @@ class DockerLogMonitor:
 
         # Start monitoring
         self.logger.info(f"Starting monitoring for {snapshot.name}: {decision.reason}")
-        assert decision.config is not None, "config must be set when should_monitor is True"
-        container_context = self._prepare_monitored_container_context(container, decision.config)
+        container_context = self._prepare_monitored_container_context(container, snapshot, decision)
         container_context.currently_configured = True
         self._start_monitoring_thread(container, container_context)
         return True
 
-    def _prepare_monitored_container_context(self, container, container_config: ContainerConfig) -> MonitoredContainerContext:
+    def _prepare_monitored_container_context(self, container, snapshot: ContainerSnapshot,
+                                             decision: MonitorDecision) -> MonitoredContainerContext:
         """Prepare or reuse monitoring context for a container."""
+        # Type narrowing: these fields must be set when should_monitor is True
+        assert decision.config_key is not None, "config_key must be set when monitoring"
+        assert decision.unit_config is not None, "unit_config must be set when monitoring"
+        assert decision.config_via_labels is not None, "config_via_labels must be set when monitoring"
+
         # Stop and remove any existing context for the same unit before creating a new one
-        if (existing := self._registry.get_by_unit_name(container_config.monitor_type, container_config.unit_name)):
+        monitor_type = MonitorType.SWARM if snapshot.is_swarm_service else MonitorType.CONTAINER
+        if (existing := self._registry.get_by_unit_name(monitor_type, snapshot.unit_name)):
             self._stop_and_remove_context(existing, wait_for_thread=True)
 
-        ctx = MonitoredContainerContext.from_container_config(container_config)
+        ctx = MonitoredContainerContext(
+            snapshot=snapshot,
+            config_key=decision.config_key,
+            unit_config=decision.unit_config,
+            config_via_labels=decision.config_via_labels
+        )
         self._registry.add(ctx)
         # Create a log processor for this container
         processor = LogProcessor(
-            self.logger, 
-            self.config, 
+            self.logger,
+            self.config,
             unit_context=ctx,
             monitor_instance=self,
-            hostname=self.hostname, 
+            hostname=self.hostname,
             unit_config=ctx.unit_config
         )
         # Add the processor to the container context
@@ -994,11 +1020,10 @@ class DockerLogMonitor:
                         self._stop_and_remove_context(ctx)
                     ctx.currently_configured = False
                 elif decision.should_monitor:
-                    # Update config
-                    # TODO: Consider using decision.config directly instead of extracting unit_config
-                    # Current approach maintains backward compatibility with existing context mutation pattern
-                    assert decision.config is not None, "config must be set when should_monitor is True"
-                    ctx.unit_config = decision.config.unit_config
+                    # Type narrowing: unit_config must be set when should_monitor is True
+                    assert decision.unit_config is not None, "unit_config must be set when should_monitor is True"
+                    # Update context with new config
+                    ctx.unit_config = decision.unit_config
                     ctx.processor.load_config_variables(self.config, ctx.unit_config)
                     ctx.currently_configured = True
                     self.logger.debug(f"Updated config for {ctx.unit_name}: {decision.reason}")
