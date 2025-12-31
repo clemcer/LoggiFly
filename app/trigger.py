@@ -9,7 +9,7 @@ from services import trigger_olivetin_action
 from utils import parse_action_target, cleanup_stale_action_cooldowns
 
 if TYPE_CHECKING:
-    from docker_monitor import DockerLogMonitor, MonitoredContainerContext
+    from docker_monitoring.monitor import DockerLogMonitor, MonitoredContainerContext
 
 logger = logging.getLogger(__name__)
 

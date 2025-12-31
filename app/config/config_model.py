@@ -321,9 +321,9 @@ class SwarmServiceConfig(KeywordBase, ModularSettings):
     hosts: Optional[str] = None
     # events: Optional[List[ContainerEventConfig]] = None
 
-    @field_validator("events", mode="before")
-    def validate_events(cls, v):
-        return validate_events(v)
+    # @field_validator("events", mode="before")
+    # def validate_events(cls, v):
+    #     return validate_events(v)
 
 class GlobalKeywords(BaseConfigModel, KeywordBase):
     """Global keyword configuration that applies to all monitored containers."""
