@@ -1,5 +1,4 @@
 from config.config_model import GlobalConfig
-from constants import MonitorLabelDecision
 from dataclasses import dataclass
 import re
 import logging
@@ -85,19 +84,6 @@ def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list
                     continue
             selected.append(object_name)
     return selected_containers, selected_swarm_services
-
-def check_monitor_label(labels) -> MonitorLabelDecision:
-    """Extract and check the 'loggifly.monitor' label value."""
-    if labels is None:
-        return MonitorLabelDecision.UNKNOWN
-    monitor_value = labels.get("loggifly.monitor", "").lower().strip()
-    if not monitor_value:
-        return MonitorLabelDecision.UNKNOWN
-    if monitor_value == "true":
-        return MonitorLabelDecision.MONITOR
-    elif monitor_value == "false":
-        return MonitorLabelDecision.SKIP
-    return MonitorLabelDecision.UNKNOWN
 
 
 def get_service_info(container, client) -> tuple[str, str, dict] | None:

@@ -1,4 +1,3 @@
-from app.config.config_model import ContainerConfig
 from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING
@@ -7,15 +6,23 @@ from enum import Enum
 from config.config_model import GlobalConfig
 from config.config_model import ContainerConfig as ModelContainerConfig, SwarmServiceConfig as ModelSwarmServiceConfig
 from config.load_config import validate_unit_config
-from constants import MonitorLabelDecision, MonitorType
-from docker_monitoring.docker_helpers import ContainerSnapshot, check_monitor_label, parse_label_config
+from constants import MonitorType
+from docker_monitoring.docker_helpers import ContainerSnapshot, parse_label_config
 
 if TYPE_CHECKING:
     from docker_monitoring.monitor import MonitoredContainerContext
 
 logger = logging.getLogger(__name__)
 
+@dataclass
 class MonitorDecision:
+    result: 'MonitorDecision.Result'
+    reason: str = ""
+    config_key: str | None = None
+    unit_config: ModelContainerConfig | ModelSwarmServiceConfig | None = None
+    config_via_labels: bool | None = None
+
+
     class Result(Enum):
         """Possible monitoring decision outcomes."""
         MONITOR = "monitor"              # Start or continue monitoring
@@ -23,25 +30,25 @@ class MonitorDecision:
         NOT_CONFIGURED = "not_configured"  # Not in config, monitor_all disabled
         STOP_MONITORING = "stop"         # Currently monitored but should stop (reload)
 
-    def __init__(self, result: 'MonitorDecision.Result', reason: str = "",
-                 config_key: str | None = None,
-                 unit_config: 'ModelContainerConfig | ModelSwarmServiceConfig | None' = None,
-                 config_via_labels: bool | None = None):
-        """
-        Initialize a monitoring decision.
+    class LabelDecision(Enum):
+        """Outcome of checking loggifly.monitor label."""
+        MONITOR = "monitor"
+        SKIP = "skip"
+        UNKNOWN = "unknown"
 
-        Args:
-            result: The decision outcome
-            reason: Human-readable explanation of why this decision was made
-            config_key: Configuration key (container/service name) - only set if result == MONITOR
-            unit_config: Unit configuration object - only set if result == MONITOR
-            config_via_labels: Whether config came from labels - only set if result == MONITOR
-        """
-        self.result = result
-        self.reason = reason
-        self.config_key = config_key
-        self.unit_config = unit_config
-        self.config_via_labels = config_via_labels
+    @staticmethod
+    def _check_label(labels: dict | None) -> 'MonitorDecision.LabelDecision':
+        """Extract and check the 'loggifly.monitor' label value."""
+        if labels is None:
+            return MonitorDecision.LabelDecision.UNKNOWN
+        monitor_value = labels.get("loggifly.monitor", "").lower().strip()
+        if not monitor_value:
+            return MonitorDecision.LabelDecision.UNKNOWN
+        if monitor_value == "true":
+            return MonitorDecision.LabelDecision.MONITOR
+        elif monitor_value == "false":
+            return MonitorDecision.LabelDecision.SKIP
+        return MonitorDecision.LabelDecision.UNKNOWN
 
     @property
     def should_monitor(self) -> bool:
@@ -58,7 +65,7 @@ class MonitorDecision:
         cls,
         snapshot: ContainerSnapshot,
         global_config: GlobalConfig,
-        hostname: str,  # For future multi-host filtering
+        hostname: str,
         skip_labels: bool = False,
     ) -> 'MonitorDecision':
         """
@@ -103,11 +110,14 @@ class MonitorDecision:
                 new_config=new_config,
                 hostname=hostname,
             )
-        else:  # MonitorType.SWARM
+        elif ctx.monitor_type == MonitorType.SWARM:
             return cls._evaluate_swarm_for_reload(
                 ctx=ctx,
                 new_config=new_config,
             )
+        else:
+            raise ValueError(f"Invalid monitor type: {ctx.monitor_type}")
+            
     @staticmethod
     def _get_container_settings_for_host(global_config: GlobalConfig, hostname: str):
         """Extract host-specific container settings."""
@@ -135,46 +145,46 @@ class MonitorDecision:
         stack_name = snapshot.stack_name
         unit_name = snapshot.unit_name
 
-        # Type narrowing: service_name is guaranteed to be non-None when is_swarm_service is True
         assert service_name is not None, "service_name must not be None for swarm service containers"
 
         # Check labels first (both service labels and container labels as fallback)
-        decision = MonitorLabelDecision.UNKNOWN
+        decision = cls.LabelDecision.UNKNOWN
         label_source = None
 
         if not skip_labels:
             # Try service labels first
             if snapshot.service_labels:
-                decision = check_monitor_label(snapshot.service_labels)
+                decision = cls._check_label(snapshot.service_labels)
                 label_source = "swarm service labels"
 
             # Fallback to container labels if unknown
-            if decision == MonitorLabelDecision.UNKNOWN:
-                decision = check_monitor_label(snapshot.labels)
+            if decision == cls.LabelDecision.UNKNOWN:
+                decision = cls._check_label(snapshot.labels)
                 label_source = "container labels"
 
         # Labels explicitly say monitor
-        if decision == MonitorLabelDecision.MONITOR:
+        if decision == cls.LabelDecision.MONITOR:
             unit_config = validate_unit_config(
                 MonitorType.SWARM,
                 parse_label_config(snapshot.service_labels or snapshot.labels)
             )
             if unit_config is None:
                 labels_info = snapshot.service_labels or snapshot.labels
-                raise ValueError(
+                logger.error(
                     f"Could not validate swarm service config for '{service_name}' from {label_source}.\n"
                     f"Labels: {labels_info}"
                 )
-            return cls(
-                result=cls.Result.MONITOR,
-                reason=f"monitored via {label_source}",
-                config_key=service_name,
-                unit_config=unit_config,
-                config_via_labels=True
-            )
+            else:
+                return cls(
+                    result=cls.Result.MONITOR,
+                    reason=f"monitored via {label_source}",
+                    config_key=service_name,
+                    unit_config=unit_config,
+                    config_via_labels=True
+                )
 
         # Labels explicitly say skip
-        if decision == MonitorLabelDecision.SKIP:
+        if decision == cls.LabelDecision.SKIP:
             return cls(
                 result=cls.Result.SKIP,
                 reason=f"label says loggifly.monitor=false ({label_source})"
@@ -234,32 +244,32 @@ class MonitorDecision:
         skip_labels: bool,
     ) -> 'MonitorDecision':
         cname = snapshot.name
-        cid = snapshot.id
 
         # Check labels
-        decision = MonitorLabelDecision.UNKNOWN if skip_labels else check_monitor_label(snapshot.labels)
+        decision = cls.LabelDecision.UNKNOWN if skip_labels else cls._check_label(snapshot.labels)
 
         # Labels explicitly say monitor
-        if decision == MonitorLabelDecision.MONITOR:
+        if decision == cls.LabelDecision.MONITOR:
             unit_config = validate_unit_config(
                 MonitorType.CONTAINER,
                 parse_label_config(snapshot.labels)
             )
             if unit_config is None:
-                raise ValueError(
+                logger.error(
                     f"Could not validate container config for '{cname}' from labels.\n"
                     f"Labels: {snapshot.labels}"
                 )
-            return cls(
-                result=cls.Result.MONITOR,
-                reason="monitored via container labels",
-                config_key=cname,
-                unit_config=unit_config,
-                config_via_labels=True
-            )
+            else:
+                return cls(
+                    result=cls.Result.MONITOR,
+                    reason="monitored via container labels",
+                    config_key=cname,
+                    unit_config=unit_config,
+                    config_via_labels=True
+                )
 
         # Labels explicitly say skip
-        if decision == MonitorLabelDecision.SKIP:
+        if decision == cls.LabelDecision.SKIP:
             return cls(
                 result=cls.Result.SKIP,
                 reason="label says loggifly.monitor=false"
