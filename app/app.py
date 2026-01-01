@@ -357,8 +357,8 @@ def start_loggifly():
                     f"\nError details: {e}")    
                                 
         logging.info(f"Starting monitoring for {host} {'(' + hostname + ')' if hostname else ''}")
-        monitor = DockerLogMonitor(config, hostname, host)
-        start_messages.append(monitor.start(client))
+        monitor = DockerLogMonitor(config=config, client=client, hostname=hostname, host=host)
+        start_messages.append(monitor.start())
         docker_hosts[host]["monitor"] = monitor
 
     monitor_instances = [docker_hosts[host]["monitor"] for host in docker_hosts.keys()]

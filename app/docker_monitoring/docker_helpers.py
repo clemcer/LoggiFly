@@ -1,8 +1,11 @@
 from config.config_model import GlobalConfig
 from dataclasses import dataclass
 import re
+import time
 import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,56 @@ class ContainerSnapshot:
             id=container.id,
             labels=container.labels or {}
         )
+
+def cleanup_stale_action_cooldowns(
+    action_cooldowns: dict,
+    max_age_seconds: int = 86400,  # 24 hours default
+    size_threshold: int = 1000      # Cleanup when dict has >1000 containers
+) -> None:
+    """
+    Remove action cooldown entries older than max_age_seconds.
+    Only runs if dict size exceeds threshold (lazy cleanup).
+    
+    Args:
+        action_cooldowns: The nested dict {container: {action: timestamp}}
+        max_age_seconds: Remove entries older than this (default 24h)
+        size_threshold: Only cleanup if dict has this many containers
+    """
+    # Only run cleanup if dict is getting large
+    if len(action_cooldowns) < size_threshold:
+        return
+    now = time.time()
+    cutoff_time = now - max_age_seconds
+    # Find stale containers (all actions are old)
+    stale_containers = []
+    for container, actions in action_cooldowns.items():
+        # Check if ALL actions for this container are stale
+        if all(timestamp < cutoff_time for timestamp in actions.values()):
+            stale_containers.append(container)
+    # Remove stale containers
+    for container in stale_containers:
+        del action_cooldowns[container]
+    # Also cleanup stale individual actions within containers
+    for container, actions in action_cooldowns.items():
+        stale_actions = [action for action, timestamp in actions.items() if timestamp < cutoff_time]
+        for action in stale_actions:
+            del actions[action]
+
+
+def parse_action_target(action: str, container_name: str) -> tuple:
+    action_parts = action.split("@")
+    if len(action_parts) == 1:
+        action_name = action_parts[0].strip().lower()
+        container_name = container_name
+    elif len(action_parts) == 2:
+        action_name = action_parts[0].strip().lower()
+        container_name = action_parts[1].strip()
+    else:
+        logger.error(f"Invalid action syntax: {action}")
+        return None, None
+    return action_name, container_name
+
+
 
 def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list[str]]:
     selected_containers = []
@@ -191,3 +244,4 @@ def parse_event_type(event: dict) -> str | None:
             return "crash"
         return "die"
     return action
+
