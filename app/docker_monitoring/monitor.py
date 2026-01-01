@@ -5,38 +5,27 @@ import traceback
 import time
 import os
 import random
-import re
 import requests
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional, Any, List
+from typing import Optional
 import docker
 from docker.models.containers import Container
 import docker.errors
-from datetime import datetime
+from datetime import datetime, timedelta
 from notifier import send_notification
 from line_processor import LogProcessor
-from config.config_model import (
-    GlobalConfig, HostConfig, 
-    ContainerConfig as ModelContainerConfig, 
-    SwarmServiceConfig as ModelSwarmServiceConfig,
-    # ContainerEventConfig as ModelContainerEventConfig,
-    OliveTinAction as ModelOliveTinAction,
-    )
-from config.load_config import validate_unit_config, get_pretty_yaml_config
+from config.config_model import GlobalConfig
+from config.config_model import ContainerConfig, SwarmServiceConfig
+from config.load_config import get_pretty_yaml_config
 from constants import (
     Actions,
     MonitorType,
-    # MonitorLabelDecision,
-    # NotificationType,
     MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS,
 )
-from services import trigger_olivetin_action
+from utils import convert_to_int
 from notification_formatter import NotificationContext
-from utils import merge_modular_settings, parse_action_target, cleanup_stale_action_cooldowns
 from trigger import process_trigger
 from docker_monitoring.decision import MonitorDecision
-from docker_monitoring.docker_helpers import ContainerSnapshot, get_service_info, get_configured
+from docker_monitoring.docker_helpers import ContainerSnapshot, get_service_info, get_configured, parse_action_target
 
 class MonitoredContainerContext:
     """
@@ -75,6 +64,7 @@ class MonitoredContainerContext:
         self.log_stream = None  # Will be set when the log stream is opened
         self.processor = None  # Will be set after initialization
         self.currently_configured = True
+        self.not_monitored_since: datetime | None = None
 
     def set_processor(self, processor):
         self.processor = processor
@@ -91,6 +81,7 @@ class MonitoredContainerRegistry:
         self._by_id = {}
         self._by_unit_name = {}
         self._lock = threading.Lock()
+        self.logger = logging.getLogger(__name__)
 
     def add(self, container_context: MonitoredContainerContext):
         monitor_type = container_context.monitor_type
@@ -150,6 +141,34 @@ class MonitoredContainerRegistry:
         with self._lock:
             return list(self._by_id.values())
 
+    def cleanup_stale_contexts(self, stale_threshold_hours: int, threshold_hours_configured: int = 24*7):
+        """
+        Remove contexts that haven't been active for stale_threshold_hours.
+        """
+        now = datetime.now()
+        stale_threshold = timedelta(hours=stale_threshold_hours)
+        configured_threshold = timedelta(hours=threshold_hours_configured)
+
+        to_remove = []
+        with self._lock:
+            for container_id, ctx in self._by_id.items():
+                if not ctx.monitoring_stopped_event.is_set():
+                    continue
+                if ctx.not_monitored_since is None:
+                    continue
+                time_since_stopped = now - ctx.not_monitored_since
+                if ctx.currently_configured:
+                    if time_since_stopped <= configured_threshold:
+                        continue
+                else:
+                    if time_since_stopped <= stale_threshold:
+                        continue
+                to_remove.append(container_id)
+
+        for container_id in to_remove: 
+            self.logger.debug(f"Removing stale context for container {container_id}")
+            self.remove(container_id)
+        return len(to_remove)
 
 class DockerLogMonitor:
     """
@@ -159,21 +178,51 @@ class DockerLogMonitor:
     Handles config reloads, container start/stop, and log processing.
     """
     
-    def __init__(self, config, hostname, host):
+    def __init__(self, config, client, hostname, host):
         """Initialize Docker log monitor for a specific host."""
         self.hostname = hostname  # empty string if only one client is being monitored, otherwise the hostname of the client do differentiate between the hosts
         self.host = host
         self.config = config
+        self.client = client
         self.swarm_mode = os.getenv("LOGGIFLY_MODE", "").strip().lower() == "swarm"
-        self._registry = MonitoredContainerRegistry()
-        self.event_stream = None
+        self._init_swarm_mode()
+        self._init_logging()
+        if self.swarm_mode:
+            self.logger.info(f"Running in swarm mode.")
 
+        self.event_stream = None
         self.shutdown_event = threading.Event()
         self.cleanup_event = threading.Event()
         self.threads = []
         self.threads_lock = threading.Lock()
         self.last_action_time_per_container = {}
         self.last_action_lock = threading.Lock()
+        self._registry = MonitoredContainerRegistry()
+
+        self.stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS", "24"), fallback_value=24)
+        self.cleanup_interval_minutes = convert_to_int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"), fallback_value=60)
+        self._start_cleanup_thread()
+
+
+    def _init_swarm_mode(self):
+        if self.swarm_mode:
+            # Find out if manager or worker and set hostname to differentiate between the instances
+            try:
+                swarm_info = self.client.info().get("Swarm")
+                node_id = swarm_info.get("NodeID")
+            except Exception as e:
+                logging.error(f"Could not get info via docker client. Needed to get info about swarm role (manager/worker)")
+                node_id = None
+            if node_id:
+                try:
+                    node = self.client.nodes.get(node_id)
+                    manager = True if node.attrs["Spec"]["Role"] == "manager" else False
+                except Exception as e:
+                    manager = False
+                try:
+                    self.hostname = ("manager" if manager else "worker") + "@" + self.client.info()["Name"]
+                except Exception as e:
+                    self.hostname = ("manager" if manager else "worker") + "@" + socket.gethostname()
     
     def _init_logging(self):
         """Configure logger to include hostname for multi-host or swarm setups."""
@@ -189,6 +238,18 @@ class DockerLogMonitor:
         self.log_level = self.config.settings.log_level.upper()
         self.logger.setLevel(getattr(logging, self.log_level, logging.INFO))
         self.logger.propagate = False
+
+    def _start_cleanup_thread(self):
+        def cleanup_stale_contexts():
+            while not self.shutdown_event.is_set():
+                removed = self._registry.cleanup_stale_contexts(self.stale_threshold_hours)
+                if removed > 0:
+                    self.logger.info(f"Removed {removed} stale contexts.")
+                self.shutdown_event.wait(self.cleanup_interval_minutes * 60)
+
+        thread = threading.Thread(target=cleanup_stale_contexts, daemon=True)
+        thread.start()
+        self._add_thread(thread)
 
     def _add_thread(self, thread):
         with self.threads_lock:
@@ -239,7 +300,14 @@ class DockerLogMonitor:
             return False
 
         # Start monitoring
-        self.logger.info(f"Starting monitoring for {snapshot.name}: {decision.reason}")
+        if decision.config_via_labels:
+            self.logger.info(
+                f"Monitoring for {snapshot.name} via docker labels.\
+                    \nConfig:\n{get_pretty_yaml_config(decision.unit_config, top_level_key=snapshot.name)}"
+                    )
+        else:
+            self.logger.info(f"Starting monitoring for {snapshot.name}: {decision.reason}")
+
         container_context = self._prepare_monitored_container_context(container, snapshot, decision)
         container_context.currently_configured = True
         self._start_monitoring_thread(container, container_context)
@@ -253,10 +321,31 @@ class DockerLogMonitor:
         assert decision.unit_config is not None, "unit_config must be set when monitoring"
         assert decision.config_via_labels is not None, "config_via_labels must be set when monitoring"
 
-        # Stop and remove any existing context for the same unit before creating a new one
         monitor_type = MonitorType.SWARM if snapshot.is_swarm_service else MonitorType.CONTAINER
-        if (existing := self._registry.get_by_unit_name(monitor_type, snapshot.unit_name)):
-            self._stop_and_remove_context(existing, wait_for_thread=True)
+
+        if (ctx := self._registry.get_by_unit_name(monitor_type, snapshot.unit_name)):
+            if not ctx.processor:  
+                self.logger.error(f"Processor not found for container {snapshot.unit_name}. Stopping monitoring.")
+                self._stop_and_remove_context(ctx)
+            else:
+                self._stop_and_close_stream(ctx.container_id)
+                if not ctx.monitoring_stopped_event.wait(2):
+                    self.logger.warning(f"Old monitoring thread for {snapshot.unit_name} might not have been closed.")
+                self.logger.debug(f"{snapshot.unit_name}: Re-Using old context")
+                self._registry.update_id(ctx.container_id, container.id)
+                ctx.snapshot = snapshot
+                ctx.unit_config = decision.unit_config
+                ctx.config_via_labels = decision.config_via_labels
+                ctx.unit_name = snapshot.unit_name
+                ctx.container_name = snapshot.name
+                # ctx.container_id = snapshot.id # handled in _registry.update_id()
+                ctx.generation += 1
+                ctx.stop_monitoring_event.clear()
+                ctx.currently_configured = True
+                ctx.not_monitored_since = None
+                ctx.processor.load_config_variables(self.config, decision.unit_config)
+                ctx.processor.start_flush_thread_if_needed()
+                return ctx
 
         ctx = MonitoredContainerContext(
             snapshot=snapshot,
@@ -278,10 +367,30 @@ class DockerLogMonitor:
         ctx.set_processor(processor)
         return ctx
 
+    def _stop_and_close_stream(self, container_id):
+        """Close log stream connection for a specific container."""
+        if not container_id:
+            self.logger.debug("No container_id provided to close stream connection.")
+            return
+        if container_context := self._registry.get_by_id(container_id):
+            unit_name = container_context.unit_name
+            if stream := container_context.log_stream:
+                # with self._registry._lock:
+                container_context.stop_monitoring_event.set()
+                self.logger.info(f"Closing Log Stream connection for {unit_name}")
+                try:
+                    stream.close()
+                    container_context.log_stream = None
+                    container_context.not_monitored_since = datetime.now()
+                except Exception as e:
+                    self.logger.warning(f"Error trying do close log stream for {unit_name}: {e}")
+            else:
+                self.logger.debug(f"No log stream found for container {unit_name}. Nothing to close.")
+        else:
+            self.logger.debug(f"Could not find container context for container_id {container_id}. Cannot close stream connection.")
+
     def _stop_and_remove_context(self, container_context: MonitoredContainerContext, wait_timeout: float = 2.0, wait_for_thread: bool = True):
         """Signal a monitoring thread to stop, close its stream, and remove the context from the registry."""
-        if not container_context:
-            return
         unit_name = container_context.unit_name
         container_context.stop_monitoring_event.set()
         if stream := container_context.log_stream:
@@ -298,41 +407,7 @@ class DockerLogMonitor:
         self._registry.remove(container_context.container_id)
 
            
-    def start(self, client) -> str:
-        """
-        Start monitoring for all configured containers and Docker events using the provided Docker client.
-        Handles swarm mode and hostname assignment.
-
-        Args:
-            client: Docker client instance
-            
-        Returns:
-            str: Summary message about started monitoring
-        """
-        self.client = client
-
-        if self.swarm_mode:
-            # Find out if manager or worker and set hostname to differentiate between the instances
-            try:
-                swarm_info = client.info().get("Swarm")
-                node_id = swarm_info.get("NodeID")
-            except Exception as e:
-                self.logger.error(f"Could not get info via docker client. Needed to get info about swarm role (manager/worker)")
-                node_id = None
-            if node_id:
-                try:
-                    node = client.nodes.get(node_id)
-                    manager = True if node.attrs["Spec"]["Role"] == "manager" else False
-                except Exception as e:
-                    manager = False
-                try:
-                    self.hostname = ("manager" if manager else "worker") + "@" + self.client.info()["Name"]
-                except Exception as e:
-                    self.hostname = ("manager" if manager else "worker") + "@" + socket.gethostname()
-        self._init_logging()
-        if self.swarm_mode:
-            self.logger.info(f"Running in swarm mode.")
-
+    def start(self) -> str:
         for container in self.client.containers.list():
             self._maybe_monitor_container(container)
 
@@ -368,7 +443,7 @@ class DockerLogMonitor:
                 if decision.should_stop:
                     if not ctx.monitoring_stopped_event.is_set():
                         self.logger.info(f"Stopping monitoring for {ctx.unit_name}: {decision.reason}")
-                        self._stop_and_remove_context(ctx)
+                        self._stop_and_close_stream(ctx.container_id)
                     ctx.currently_configured = False
                 elif decision.should_monitor:
                     # Type narrowing: unit_config must be set when should_monitor is True
@@ -381,7 +456,8 @@ class DockerLogMonitor:
             # start monitoring containers that are in the config but not monitored yet
             for container in self.client.containers.list():
                 # Only start monitoring containers that are newly added to the config.yaml, not monitored yet and not configured via labels
-                if not (ctx := self._registry.get_by_id(container.id)) or ctx.monitoring_stopped_event.is_set():
+                if not (ctx := self._registry.get_by_id(container.id)) or \
+                (ctx.monitoring_stopped_event.is_set() and not ctx.currently_configured):
                     self._maybe_monitor_container(container, skip_labels=True)
 
             return self._start_message()
@@ -488,17 +564,14 @@ class DockerLogMonitor:
             monitoring_stopped_event = container_context.monitoring_stopped_event
             unit_name = container_context.unit_name
             processor = container_context.processor
+            gen = container_context.generation
             if driver in ('none', ''):
                 self.logger.warning(f"Container {container.name} has LoggingDriver 'none' – no logs available.")
                 stop_monitoring_event.set() 
-                monitoring_stopped_event.set()  
-                return
             elif not processor:
                 self.logger.error(f"Processor not found for container {unit_name}. Stopping monitoring.")
                 stop_monitoring_event.set() 
-                monitoring_stopped_event.set()  
-                return
-
+            log_stream = None
             while not self.shutdown_event.is_set() and not stop_monitoring_event.is_set():
                 buffer = b""
                 not_found_error = False
@@ -521,7 +594,7 @@ class DockerLogMonitor:
                             except UnicodeDecodeError:
                                 log_line_decoded = line.decode("utf-8", errors="replace").strip()
                                 self.logger.warning(f"{unit_name}: Error while trying to decode a log line. Used errors='replace' for line: {log_line_decoded}")
-                            if log_line_decoded:
+                            if log_line_decoded and processor:
                                 processor.process_line(log_line_decoded)
                 except docker.errors.NotFound as e:
                     self.logger.error(f"Container {unit_name} not found during Log Stream: {e}")
@@ -532,18 +605,30 @@ class DockerLogMonitor:
                         self.logger.error("Error trying to monitor %s: %s", unit_name, e)
                         self.logger.debug(traceback.format_exc())
                 finally:
+                    should_break = False
                     if self.shutdown_event.is_set():
-                        break
-                    if stop_monitoring_event.is_set() or too_many_errors or not_found_error \
+                        should_break = True
+                    if gen != container_context.generation:  # if there is a new thread running for this container this thread stops
+                        self.logger.debug(f"{unit_name}: Stopping monitoring thread because a new thread was started for this container.")
+                        should_break = True
+                    elif stop_monitoring_event.is_set() or too_many_errors or not_found_error \
                     or check_container(container_start_time, error_count) is False:
-                        # self._stop_and_remove_context(container_context, wait_for_thread=False)
+                        should_break = True
+                    if should_break:
                         break
                     else:
                         self.logger.info(f"{unit_name}: Log Stream stopped. Reconnecting... {'error count: ' + str(error_count) if error_count > 0 else ''}")
             self.logger.info(f"Monitoring stopped for container {unit_name}.")
+            if log_stream:
+                try:
+                    self.logger.debug(f"Closing log stream for {unit_name} via new method")
+                    log_stream.close()
+                except Exception as e:
+                    self.logger.debug(f"Error trying to close log stream for {unit_name}: {e}")
+            container_context.log_stream = None
+            container_context.not_monitored_since = datetime.now()
             stop_monitoring_event.set() 
             monitoring_stopped_event.set()  
-            self._registry.remove(container_context.container_id)
 
         thread = threading.Thread(target=log_monitor, daemon=True)
         self._add_thread(thread)
@@ -605,7 +690,7 @@ class DockerLogMonitor:
                         elif event.get("Action") == "stop":
                             if ctx := self._registry.get_by_id(container_id):
                                 self.logger.debug(f"The Container {container_name or container_id} was stopped. Stopping Monitoring now.")
-                                self._stop_and_remove_context(ctx)
+                                self._stop_and_close_stream(ctx.container_id)
                        
                 except docker.errors.NotFound as e:
                     self.logger.error(f"Docker Event Handler: Container {container} not found: {e}")

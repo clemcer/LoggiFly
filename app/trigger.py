@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from notification_formatter import NotificationContext, render_title, render_message
 from notifier import send_notification
 from services import trigger_olivetin_action
-from utils import parse_action_target, cleanup_stale_action_cooldowns
+from docker_monitoring.docker_helpers import parse_action_target, cleanup_stale_action_cooldowns
 
 if TYPE_CHECKING:
     from docker_monitoring.monitor import DockerLogMonitor, MonitoredContainerContext

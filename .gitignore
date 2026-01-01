@@ -9,3 +9,5 @@ node_modules
 cache
 notes.txt
 compose.dev.yaml
+tests/
+requirements-dev.txt
