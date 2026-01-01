@@ -8,13 +8,6 @@ class MonitorType(Enum):
     SWARM = "swarm"
 
 
-class MonitorLabelDecision(Enum):
-    """Decisions for whether to monitor a container based on labels."""
-    MONITOR = "monitor"
-    SKIP = "skip"
-    UNKNOWN = "unknown"
-
-
 # Log Pattern Constants
 # These patterns are used to detect the start of new log entries in multi-line mode.
 # When a pattern is detected, it indicates the beginning of a new log entry,
