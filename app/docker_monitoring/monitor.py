@@ -64,7 +64,7 @@ class MonitoredContainerContext:
         self.log_stream = None  # Will be set when the log stream is opened
         self.processor = None  # Will be set after initialization
         self.currently_configured = True
-        self.not_monitored_since: datetime | None = None
+        self.not_monitored_since: datetime | None = None # time when the container was last monitored. needed for context cleanup
 
     def set_processor(self, processor):
         self.processor = processor
@@ -82,6 +82,7 @@ class MonitoredContainerRegistry:
         self._by_unit_name = {}
         self._lock = threading.Lock()
         self.logger = logging.getLogger(__name__)
+
 
     def add(self, container_context: MonitoredContainerContext):
         monitor_type = container_context.monitor_type
@@ -302,9 +303,9 @@ class DockerLogMonitor:
         # Start monitoring
         if decision.config_via_labels:
             self.logger.info(
-                f"Monitoring for {snapshot.name} via docker labels.\
-                    \nConfig:\n{get_pretty_yaml_config(decision.unit_config, top_level_key=snapshot.name)}"
-                    )
+                f"Monitoring {snapshot.name} via docker labels.\
+                \nConfig:\n{get_pretty_yaml_config(decision.unit_config, top_level_key=snapshot.name)}"
+                )
         else:
             self.logger.info(f"Starting monitoring for {snapshot.name}: {decision.reason}")
 
@@ -313,8 +314,12 @@ class DockerLogMonitor:
         self._start_monitoring_thread(container, container_context)
         return True
 
-    def _prepare_monitored_container_context(self, container, snapshot: ContainerSnapshot,
-                                             decision: MonitorDecision) -> MonitoredContainerContext:
+    def _prepare_monitored_container_context(
+        self, 
+        container, 
+        snapshot: ContainerSnapshot,
+        decision: MonitorDecision
+        ) -> MonitoredContainerContext:
         """Prepare or reuse monitoring context for a container."""
         # Type narrowing: these fields must be set when should_monitor is True
         assert decision.config_key is not None, "config_key must be set when monitoring"
@@ -326,10 +331,9 @@ class DockerLogMonitor:
         if (ctx := self._registry.get_by_unit_name(monitor_type, snapshot.unit_name)):
             if not ctx.processor:  
                 self.logger.error(f"Processor not found for container {snapshot.unit_name}. Stopping monitoring.")
-                self._stop_and_remove_context(ctx)
+                self._stop_and_remove_context(ctx, wait_for_thread=True)
             else:
-                self._stop_and_close_stream(ctx.container_id)
-                if not ctx.monitoring_stopped_event.wait(2):
+                if not self._stop_and_close_stream(ctx, wait_for_thread=True):
                     self.logger.warning(f"Old monitoring thread for {snapshot.unit_name} might not have been closed.")
                 self.logger.debug(f"{snapshot.unit_name}: Re-Using old context")
                 self._registry.update_id(ctx.container_id, container.id)
@@ -367,43 +371,27 @@ class DockerLogMonitor:
         ctx.set_processor(processor)
         return ctx
 
-    def _stop_and_close_stream(self, container_id):
+    def _stop_and_close_stream(self, ctx: MonitoredContainerContext, wait_for_thread: bool = True, wait_timeout: float = 2.0) -> bool:
         """Close log stream connection for a specific container."""
-        if not container_id:
-            self.logger.debug("No container_id provided to close stream connection.")
-            return
-        if container_context := self._registry.get_by_id(container_id):
-            unit_name = container_context.unit_name
-            if stream := container_context.log_stream:
-                # with self._registry._lock:
-                container_context.stop_monitoring_event.set()
-                self.logger.info(f"Closing Log Stream connection for {unit_name}")
-                try:
-                    stream.close()
-                    container_context.log_stream = None
-                    container_context.not_monitored_since = datetime.now()
-                except Exception as e:
-                    self.logger.warning(f"Error trying do close log stream for {unit_name}: {e}")
-            else:
-                self.logger.debug(f"No log stream found for container {unit_name}. Nothing to close.")
-        else:
-            self.logger.debug(f"Could not find container context for container_id {container_id}. Cannot close stream connection.")
+        ctx.stop_monitoring_event.set()
+        if ctx.log_stream:
+            self.logger.info(f"Closing Log Stream connection for {ctx.unit_name}")
+            try:
+                ctx.log_stream.close()
+            except Exception as e:
+                self.logger.warning(f"Error trying to close log stream for {ctx.unit_name}: {e}")
+            finally:
+                ctx.log_stream = None
+                ctx.not_monitored_since = datetime.now()
+        if wait_for_thread:
+            if not ctx.monitoring_stopped_event.wait(wait_timeout):
+                self.logger.debug(f"Monitoring thread for {ctx.unit_name} did not stop within {wait_timeout} seconds.")
+                return False
+        return True
 
     def _stop_and_remove_context(self, container_context: MonitoredContainerContext, wait_timeout: float = 2.0, wait_for_thread: bool = True):
         """Signal a monitoring thread to stop, close its stream, and remove the context from the registry."""
-        unit_name = container_context.unit_name
-        container_context.stop_monitoring_event.set()
-        if stream := container_context.log_stream:
-            self.logger.info(f"Closing Log Stream connection for {unit_name}")
-            try:
-                stream.close()
-            except Exception as e:
-                self.logger.warning(f"Error trying to close log stream for {unit_name}: {e}")
-            finally:
-                container_context.log_stream = None
-        if wait_for_thread:
-            if not container_context.monitoring_stopped_event.wait(wait_timeout):
-                self.logger.debug(f"Monitoring thread for {unit_name} did not stop within {wait_timeout} seconds.")
+        self._stop_and_close_stream(container_context, wait_for_thread=wait_for_thread, wait_timeout=wait_timeout)
         self._registry.remove(container_context.container_id)
 
            
@@ -430,8 +418,6 @@ class DockerLogMonitor:
         try:
             # stop monitoring containers that are no longer in the config and update config in line processor instances
             for ctx in list(self._registry.values()):
-                if not ctx.processor:
-                    continue
 
                 # Evaluate whether to continue monitoring with new config
                 decision = MonitorDecision.evaluate_for_reload(
@@ -443,11 +429,12 @@ class DockerLogMonitor:
                 if decision.should_stop:
                     if not ctx.monitoring_stopped_event.is_set():
                         self.logger.info(f"Stopping monitoring for {ctx.unit_name}: {decision.reason}")
-                        self._stop_and_close_stream(ctx.container_id)
+                        self._stop_and_close_stream(ctx, wait_for_thread=False)
                     ctx.currently_configured = False
                 elif decision.should_monitor:
                     # Type narrowing: unit_config must be set when should_monitor is True
                     assert decision.unit_config is not None, "unit_config must be set when should_monitor is True"
+                    assert ctx.processor is not None, "processor must be set when reloading config"
                     # Update context with new config
                     ctx.unit_config = decision.unit_config
                     ctx.processor.load_config_variables(self.config, ctx.unit_config)
@@ -566,7 +553,7 @@ class DockerLogMonitor:
             processor = container_context.processor
             gen = container_context.generation
             if driver in ('none', ''):
-                self.logger.warning(f"Container {container.name} has LoggingDriver 'none' – no logs available.")
+                self.logger.warning(f"Container {container.name} has LoggingDriver 'none'. No logs available.")
                 stop_monitoring_event.set() 
             elif not processor:
                 self.logger.error(f"Processor not found for container {unit_name}. Stopping monitoring.")
@@ -661,7 +648,7 @@ class DockerLogMonitor:
                         container_id = event["Actor"]["ID"]
                         container_name = event["Actor"].get("Attributes", {}).get("name", "")
                         
-                        self.logger.debug(f"Docker Event Handler: Event: {event}, Container Name: {container_name}")
+                       # self.logger.debug(f"Docker Event Handler: Event: {event}, Container Name: {container_name}")
                         
                         if event_time_ns := event.get("timeNano"):
                             last_seen_time = int(event_time_ns / 1_000_000_000)
@@ -690,7 +677,7 @@ class DockerLogMonitor:
                         elif event.get("Action") == "stop":
                             if ctx := self._registry.get_by_id(container_id):
                                 self.logger.debug(f"The Container {container_name or container_id} was stopped. Stopping Monitoring now.")
-                                self._stop_and_close_stream(ctx.container_id)
+                                self._stop_and_close_stream(ctx, wait_for_thread=False)
                        
                 except docker.errors.NotFound as e:
                     self.logger.error(f"Docker Event Handler: Container {container} not found: {e}")
@@ -880,6 +867,6 @@ class DockerLogMonitor:
                 return f"{container_name} has been started!"
         except Exception as e:
             self.logger.error(f"Failed to {action_name} {container_name}: {e}")
-            raise e
+            raise Exception(f"did not perform action. Failed to {action_name} {container_name}. More details in logs.")
 
 
