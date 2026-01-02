@@ -1,15 +1,12 @@
-from __future__ import annotations
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Optional, List, Any, TYPE_CHECKING
+from typing import Dict, Optional, List, Any
 
-from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE
-
-if TYPE_CHECKING:
-    from docker_monitoring.monitor import MonitoredContainerContext
+from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, MonitorType
+from docker_monitoring.docker_helpers import ContainerSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +108,8 @@ class NotificationContext:
     """
 
     notification_type: NotificationType
-    unit_context: MonitoredContainerContext
+    unit_name: str
+    monitor_type: MonitorType
     hostname: Optional[str] = None
     log_line: Optional[str] = None
     regex: Optional[str] = None
@@ -122,9 +120,18 @@ class NotificationContext:
     time: Optional[int | float] = None
     exit_code: Optional[int] = None
 
+    container_snapshot: Optional[ContainerSnapshot] = None
+    container_id: Optional[str] = None
+    container_name: Optional[str] = None
+    swarm_service_name: Optional[str] = None
+    stack_name: Optional[str] = None
+    
     def __post_init__(self):
-        self.unit_name = self.unit_context.unit_name
-        self.monitor_type = self.unit_context.monitor_type.value
+        self.container_id = self.container_snapshot.id if self.container_snapshot else None
+        self.swarm_service_name = self.container_snapshot.service_name if self.container_snapshot else None
+        self.stack_name = self.container_snapshot.stack_name if self.container_snapshot else None
+        self.container_name = self.container_snapshot.name if self.container_snapshot else None
+
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -145,13 +152,16 @@ class NotificationContext:
 
         # These are the default template fields that are always available
         defaults = {
-            "container": self.unit_name,
+            "container_id": self.container_id,
+            "container_name": self.container_name,
+            "swarm_service_name": self.swarm_service_name,
+            "stack_name": self.stack_name,
             "unit_name": self.unit_name,
             "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
             "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
             "event": self.event,
             "hostname": self.hostname,
-            "monitor_type": self.monitor_type,
+            "monitor_type": self.monitor_type.value,
             "original_log_line": self.log_line,
             "log_entry": self.log_line,
             "timestamp": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),

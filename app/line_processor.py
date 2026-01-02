@@ -342,7 +342,9 @@ class LogProcessor:
         
         notification_context = NotificationContext(
             notification_type=NotificationType.LOG_MATCH,
-            unit_context=self.unit_context,
+            unit_name=self.unit_name,
+            monitor_type=self.monitor_type,
+            container_snapshot=self.unit_context.snapshot,
             keywords_found=keywords_found,
             log_line=log_line,
             regex=keyword_level_config.get("regex"),
@@ -356,7 +358,6 @@ class LogProcessor:
             monitor_instance=self.monitor_instance,
             unit_context=self.unit_context,
             notification_context=notification_context,
-            # olivetin_configs=keyword_level_config.get("olivetin_actions", []) or [],
         )
 
     def _log_attachment(self, number_attachment_lines):

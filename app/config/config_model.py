@@ -277,23 +277,23 @@ class KeywordBase(BaseModel):
         return data
 
 
-# class ContainerEventConfig(ModularSettings):
-#     event: Literal[*SUPPORTED_EVENTS] # type: ignore
-#     action: Optional[str] = None
-#     olivetin_actions: Optional[List[OliveTinAction]] = None
+class DockerEventConfig(ModularSettings):
+    event: Literal[*SUPPORTED_EVENTS] # type: ignore
+    action: Optional[str] = None
+    olivetin_actions: Optional[List[OliveTinAction]] = None
 
-#     @model_validator(mode="before")
-#     def validate_olivetin(cls, data: dict) -> dict:
-#         if data and isinstance(data, dict):
-#             return validate_and_filter_olivetin_actions(data)
-#         return data
+    @model_validator(mode="before")
+    def validate_olivetin(cls, data: dict) -> dict:
+        if data and isinstance(data, dict):
+            return validate_and_filter_olivetin_actions(data)
+        return data
 
-#     @field_validator("action")
-#     def validate_action(cls, v):
-#         """Validate action against available actions enum."""
-#         if v and v.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
-#             return None
-#         return v    
+    @field_validator("action")
+    def validate_action(cls, v):
+        """Validate action against available actions enum."""
+        if v and v.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
+            return None
+        return v    
 
 
 class ContainerConfig(KeywordBase, ModularSettings):    
@@ -302,15 +302,15 @@ class ContainerConfig(KeywordBase, ModularSettings):
     Allows targeting specific hosts when multiple Docker hosts are configured.
     """
     hosts: Optional[str] = None
-    # events: Optional[List[ContainerEventConfig]] = None
+    events: Optional[List[DockerEventConfig]] = None
     
     @field_validator("ntfy_priority", mode="before")
     def validate_priority(cls, v):
         return validate_priority(v)
 
-    # @field_validator("events", mode="before")
-    # def validate_events(cls, v):
-    #     return validate_events(v)
+    @field_validator("events", mode="before")
+    def validate_events(cls, v):
+        return validate_events(v)
 
 class SwarmServiceConfig(KeywordBase, ModularSettings):
     """
@@ -319,11 +319,11 @@ class SwarmServiceConfig(KeywordBase, ModularSettings):
     """
     _DISALLOW_ACTION: ClassVar[bool] = True
     hosts: Optional[str] = None
-    # events: Optional[List[ContainerEventConfig]] = None
+    events: Optional[List[DockerEventConfig]] = None
 
-    # @field_validator("events", mode="before")
-    # def validate_events(cls, v):
-    #     return validate_events(v)
+    @field_validator("events", mode="before")
+    def validate_events(cls, v):
+        return validate_events(v)
 
 class GlobalKeywords(BaseConfigModel, KeywordBase):
     """Global keyword configuration that applies to all monitored containers."""

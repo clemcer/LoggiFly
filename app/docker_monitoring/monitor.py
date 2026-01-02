@@ -14,19 +14,21 @@ from datetime import datetime, timedelta
 from notifier import send_notification
 from line_processor import LogProcessor
 from config.config_model import GlobalConfig
-from config.config_model import ContainerConfig, SwarmServiceConfig
+from config.config_model import DockerEventConfig
 from config.load_config import get_pretty_yaml_config
 from constants import (
     Actions,
     MonitorType,
     MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS,
+    NotificationType,
 )
-from utils import convert_to_int
+from utils import convert_to_int, merge_modular_settings
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.decision import MonitorDecision
-from docker_monitoring.docker_helpers import ContainerSnapshot, get_service_info, get_configured, parse_action_target
-
+from docker_monitoring.docker_helpers import (
+    ContainerSnapshot, get_service_info, get_configured, parse_action_target, parse_event_type
+)
 class MonitoredContainerContext:
     """
     Runtime monitoring state for a container.
@@ -293,6 +295,8 @@ class DockerLogMonitor:
                 self.logger.debug(f"Skipping {snapshot.name}: {decision.reason}")
             elif decision.result == MonitorDecision.Result.NOT_CONFIGURED:
                 self.logger.debug(f"Not monitoring {snapshot.name}: {decision.reason}")
+            elif decision.result == MonitorDecision.Result.STOP_MONITORING:
+                self.logger.debug(f"Stop Monitoring {snapshot.name}: {decision.reason}")
             return False
             
         # Self-monitoring check
@@ -654,12 +658,12 @@ class DockerLogMonitor:
                             last_seen_time = int(event_time_ns / 1_000_000_000)
                         elif event_time := event.get("time"):
                             last_seen_time = int(event_time)
-                        try:
-                            container = self.client.containers.get(container_id)
-                        except docker.errors.NotFound:
-                            self.logger.debug(f"Docker Event Handler: Container {container_id} not found.")
-                            continue
-                        if event.get("Action") == "start" and container:
+                        if event.get("Action") == "start":
+                            try:
+                                container = self.client.containers.get(container_id)
+                            except docker.errors.NotFound:
+                                self.logger.debug(f"Docker Event Handler: Container {container_id} not found.")
+                                continue
                             if self._maybe_monitor_container(container):
                                 if self.config.settings.disable_container_event_message is False:
                                     if ctx := self._registry.get_by_id(container.id):
@@ -668,17 +672,15 @@ class DockerLogMonitor:
                                         unit_name = container_name
                                     # TODO: maybe add template fields
                                     send_notification(self.config, title="Loggifly", message=f"Monitoring new container: {unit_name}", hostname=self.hostname)
-                 
-                        # TODO: checking should_monitor and building ctx is not ideal
-                        # if container and (cfg := self._should_monitor(container)): 
-                        #     ctx = MonitoredContainerContext.from_container_config(cfg)
-                        #     self._process_event(event, ctx)
 
                         elif event.get("Action") == "stop":
                             if ctx := self._registry.get_by_id(container_id):
                                 self.logger.debug(f"The Container {container_name or container_id} was stopped. Stopping Monitoring now.")
                                 self._stop_and_close_stream(ctx, wait_for_thread=False)
-                       
+
+                        if (ctx:= self._registry.get_by_id(container_id)) and ctx.currently_configured:
+                            self._process_event(event, ctx)
+
                 except docker.errors.NotFound as e:
                     self.logger.error(f"Docker Event Handler: Container {container} not found: {e}")
                 except Exception as e:
@@ -700,42 +702,44 @@ class DockerLogMonitor:
         thread.start()
 
 
-    # def _process_event(self, event, ctx: MonitoredContainerContext):
-    #     """
-    #     Process a Docker event.
-    #     """
-    #     configured_events: List[ModelContainerEventConfig] = ctx.unit_config.events
-    #     if not configured_events:
-    #         return
-    #     event_type = parse_event_type(event)
-    #     if not event_type:
-    #         return
-    #     ce = next((ce for ce in configured_events if ce.event == event_type), None)
-    #     if not ce:
-    #         self.logger.info(f"Event {event_type} for container {ctx.unit_name} is not configured. Skipping event.")
-    #         return
-    #     self.logger.debug(f"Event {event_type} for container {ctx.unit_name} is configured. Processing event.")
-    #     unit_modular_settings = merge_modular_settings(ctx.unit_config.model_dump(), self.config.settings.model_dump())
-    #     trigger_level_config = ce.model_dump()
-    #     merged_modular_settings = merge_modular_settings(trigger_level_config, unit_modular_settings)
-    #     exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
-    #     notification_context = NotificationContext(
-    #         notification_type=NotificationType.DOCKER_EVENT,
-    #         unit_context=ctx,
-    #         event=event_type,
-    #         hostname=self.hostname,
-    #         time=event.get("time"),
-    #         exit_code=exit_code,
-    #     )
-    #     process_trigger(
-    #         logger=self.logger,
-    #         config=self.config,
-    #         modular_settings=merged_modular_settings,
-    #         trigger_level_config=trigger_level_config,
-    #         monitor_instance=self,
-    #         unit_context=ctx,
-    #         notification_context=notification_context,
-    #     )
+    def _process_event(self, event, ctx: MonitoredContainerContext):
+        """
+        Process a Docker event.
+        """
+        configured_events: list[DockerEventConfig] = ctx.unit_config.events
+        if not configured_events:
+            return
+        event_type = parse_event_type(event)
+        if not event_type:
+            return
+        ce = next((ce for ce in configured_events if ce.event == event_type), None)
+        if not ce:
+            self.logger.info(f"Event {event_type} for container {ctx.unit_name} is not configured. Skipping event.")
+            return
+        self.logger.debug(f"Event {event_type} for container {ctx.unit_name} is configured. Processing event.")
+        unit_modular_settings = merge_modular_settings(ctx.unit_config.model_dump(), self.config.settings.model_dump())
+        trigger_level_config = ce.model_dump()
+        merged_modular_settings = merge_modular_settings(trigger_level_config, unit_modular_settings)
+        exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
+        notification_context = NotificationContext(
+            notification_type=NotificationType.DOCKER_EVENT,
+            unit_name=ctx.unit_name,
+            monitor_type=ctx.monitor_type,
+            container_snapshot=ctx.snapshot,
+            event=event_type,
+            hostname=self.hostname,
+            time=event.get("time"),
+            exit_code=exit_code,
+        )
+        process_trigger(
+            logger=self.logger,
+            config=self.config,
+            modular_settings=merged_modular_settings,
+            trigger_level_config=trigger_level_config,
+            monitor_instance=self,
+            unit_context=ctx,
+            notification_context=notification_context,
+        )
 
     def cleanup(self, timeout=1.5):
         """
@@ -811,7 +815,6 @@ class DockerLogMonitor:
 
         try:
             container = self.client.containers.get(container_name)
-            # TODO: Maybe container snapshot.is_swarm_service()
             if get_service_info(container, self.client):
                 self.logger.error(f"Container {container_name} belongs to a swarm service. Cannot perform action: {action}")
                 raise Exception(f"did not perform action. Container '{container_name}' belongs to a swarm service.")

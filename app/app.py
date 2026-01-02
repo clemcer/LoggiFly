@@ -211,7 +211,8 @@ def check_monitor_status(docker_hosts, global_shutdown_event):
                     if new_client:
                         logging.info(f"Successfully reconnected to {host} ({label})")
                         monitor.shutdown_event.clear()
-                        monitor.start(new_client)
+                        monitor.client = new_client
+                        monitor.start()
                         monitor.reload_config(None)
 
     thread = threading.Thread(target=check_and_reconnect, daemon=True)

@@ -91,24 +91,28 @@ MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS = {
     "destroy": "destroy",
     "healthy": "health_status: healthy",
     "unhealthy": "health_status: unhealthy",
+    "oom": "oom"
 }
 
 MAP_EVENT_TO_TITLE = {
-    "start": "Container '{container}' started",
-    "stop": "Container '{container}' stopped",
-    "die": "Container '{container}' crashed",
-    "crash": "Container '{container}' crashed",
-    "destroy": "Container '{container}' destroyed",
-    "healthy": "Container '{container}' is healthy",
-    "unhealthy": "Container '{container}' is unhealthy",
+    "start": "Container '{unit_name}' started",
+    "stop": "Container '{unit_name}' stopped",
+    "die": "Container '{unit_name}' crashed",
+    "crash": "Container '{unit_name}' crashed",
+    "destroy": "Container '{unit_name}' destroyed",
+    "healthy": "Container '{unit_name}' is healthy",
+    "unhealthy": "Container '{unit_name}' is unhealthy",
+    "oom": "'{unit_name}': Out Of Memory"
 }
 
 MAP_EVENT_TO_MESSAGE = {
-    "start": "Container '{container}' was started.",
-    "stop": "Container '{container}' was stopped.",
-    "die": "Container '{container}' died with exit code: {exit_code}.",
-    "crash": "Container '{container}' crashed. Exit code: {exit_code}.",
-    "destroy": "Container '{container}' was destroyed.",
-    "healthy": "Container '{container}' is healthy.",
-    "unhealthy": "Container '{container}' is unhealthy.",
+    "start": "Container '{unit_name}' was started.",
+    "stop": "Container '{unit_name}' was stopped.",
+    "die": "Container '{unit_name}' died with exit code: {exit_code}.",
+    "crash": "Container '{unit_name}' crashed. Exit code: {exit_code}.",
+    "destroy": "Container '{unit_name}' was destroyed.",
+    "healthy": "Container '{unit_name}' is healthy.",
+    "unhealthy": "Container '{unit_name}' is unhealthy.",
+    "oom": "'Container {unit_name}' ran out of memory"
+
 }
