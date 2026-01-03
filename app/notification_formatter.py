@@ -110,15 +110,17 @@ class NotificationContext:
     notification_type: NotificationType
     unit_name: str
     monitor_type: MonitorType
+
     hostname: Optional[str] = None
+    host_identifier: Optional[str] = None # hostname for multi-host setups, "manager@node1" or "worker@node2" for swarm, else None
     log_line: Optional[str] = None
     regex: Optional[str] = None
     keywords_found: List[str] = field(default_factory=list)
     event: Optional[str] = None
+    exit_code: Optional[int] = None
     action_result: Optional[str] = None
     extra_fields: Dict[str, Any] = field(default_factory=dict)
     time: Optional[int | float] = None
-    exit_code: Optional[int] = None
 
     container_snapshot: Optional[ContainerSnapshot] = None
     container_id: Optional[str] = None
@@ -161,6 +163,7 @@ class NotificationContext:
             "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
             "event": self.event,
             "hostname": self.hostname,
+            "host_identifier": self.host_identifier,
             "monitor_type": self.monitor_type.value,
             "original_log_line": self.log_line,
             "log_entry": self.log_line,
@@ -194,22 +197,29 @@ def render_title(
         rendered, missing = _format_with_safe_dict(template, context_dict)
         if missing:
             logging.warning(f"Missing keys in title template: {missing}.")
-        return rendered
-    if ctx.notification_type == NotificationType.LOG_MATCH:
-        title = default_title_for_log_match(ctx.keywords_found, ctx.unit_name)
-    elif ctx.notification_type == NotificationType.DOCKER_EVENT:
-        if ctx.event:
-            logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')} and context: {context_dict}")
+        title = rendered
 
-            title, missing = _format_with_safe_dict(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
-            if missing:
-                logging.warning(f"Missing keys in event default title template: {missing}.")
-        if not title: # fallback
-            title = default_title_for_event(ctx.unit_name, ctx.event)
-    
+    # Default when no template is provided
+    if not title:
+        if ctx.notification_type == NotificationType.LOG_MATCH:
+            title = default_title_for_log_match(ctx.keywords_found, ctx.unit_name)
+        elif ctx.notification_type == NotificationType.DOCKER_EVENT:
+            if ctx.event:
+                logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')} and context: {context_dict}")
+                title, missing = _format_with_safe_dict(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
+                if missing:
+                    logging.warning(f"Missing keys in event default title template: {missing}.")
+            if not title: # fallback
+                title = default_title_for_event(ctx.unit_name, ctx.event)
+
+        # Prepend host identifier to title (only exists for multi-host or swarm setups)
+        if ctx.host_identifier:
+            title = f"[{ctx.host_identifier}] - {title}"
+
     # Safe fallback
     if not title:
         title = f"{ctx.unit_name}: {context_dict.get('keywords') or context_dict.get('event')}"
+    # Append action result to title
     if ctx.action_result is not None:
         title = f"{title} ({ctx.action_result})"
     return title
@@ -240,6 +250,5 @@ def render_message(
             if not missing:
                 return rendered
             logging.warning(f"Missing keys in default event message template: {missing}. Falling back to default message.")
-            # TODO: test this
     # Fallback
     return default_message or ctx.log_line or ""

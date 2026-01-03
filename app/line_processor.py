@@ -39,7 +39,6 @@ class LogProcessor:
                  unit_config: ContainerConfig | SwarmServiceConfig,
                  monitor_instance,
                  unit_context,
-                 hostname=None 
                  ):
         """
         Initialize the log processor for a specific container or service.
@@ -49,13 +48,9 @@ class LogProcessor:
             config: Global configuration object
             unit_config: Container/service specific configuration
             monitor_instance: DockerMonitor instance from which the processor is called
-            unit_name: Unique name for the monitored unit
-            monitor_type: MonitorType.CONTAINER or MonitorType.SWARM
-            unit_stop_event: Event to signal when to stop processing
-            hostname: Hostname for multi-client setups (None if single client)
+            unit_context: MonitoredContainerContext instance
         """
         self.logger = logger
-        self.hostname = hostname    # Hostname for multi-client setups to differentiate between clients; empty if single client
         self.unit_context = unit_context
         self.unit_stop_event = unit_context.stop_monitoring_event
         self.unit_name = unit_context.unit_name
@@ -348,7 +343,8 @@ class LogProcessor:
             keywords_found=keywords_found,
             log_line=log_line,
             regex=keyword_level_config.get("regex"),
-            hostname=self.hostname,
+            hostname=self.unit_context.hostname,
+            host_identifier=self.unit_context.host_identifier,
         )        
         process_trigger(
             logger=self.logger,

@@ -273,7 +273,7 @@ def send_notification(config: GlobalConfig,
                       message: str,
                       modular_settings: dict | None = None,
                       attachment: dict | None = None,
-                      hostname: str | None = None,
+                    #   hostname: str | None = None,
                       template_fields: dict | None = None
                       ):
     """
@@ -282,7 +282,7 @@ def send_notification(config: GlobalConfig,
     """
     message = message.replace(r"\n", "\n").strip() if message else ""
     # If multiple hosts are set, prepend hostname to title
-    title = f"[{hostname}] - {title}" if hostname else title
+    # title = f"[{hostname}] - {title}" if hostname else title
     if not config.notifications:
         return
     nc = config.notifications.model_dump(exclude_none=True)
