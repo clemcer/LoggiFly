@@ -92,7 +92,6 @@ def process_trigger(
             modular_settings=modular_settings,
             template_fields=notification_context.to_dict(),
             attachment=attachment,
-            hostname=monitor_instance.hostname,
         )
 
     # Trigger OliveTin actions if configured
@@ -112,6 +111,5 @@ def process_trigger(
                 template_fields=notification_context.to_dict(),
                 attachment=attachment,
                 modular_settings=modular_settings,
-                hostname=monitor_instance.hostname,
             ),
         )

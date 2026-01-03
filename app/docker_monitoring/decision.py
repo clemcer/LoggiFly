@@ -81,6 +81,7 @@ class MonitorDecision:
             return cls._evaluate_swarm(
                 snapshot=snapshot,
                 global_config=global_config,
+                hostname=hostname,
                 skip_labels=skip_labels,
             )
         else:
@@ -114,6 +115,7 @@ class MonitorDecision:
             return cls._evaluate_swarm_for_reload(
                 ctx=ctx,
                 new_config=new_config,
+                hostname=hostname,
             )
         else:
             raise ValueError(f"Invalid monitor type: {ctx.monitor_type}")
@@ -134,11 +136,18 @@ class MonitorDecision:
 
         return containers, monitor_all_containers, excluded_containers
 
+    @staticmethod
+    def is_excluded_for_host(unit_config: ModelContainerConfig | ModelSwarmServiceConfig, hostname: str) -> bool:
+        if not hostname or not unit_config.hosts:
+            return False
+        return any(hn.strip() == hostname for hn in unit_config.hosts.split(","))
+
     @classmethod
     def _evaluate_swarm(
         cls,
         snapshot: ContainerSnapshot,
         global_config: GlobalConfig,
+        hostname: str,
         skip_labels: bool,
     ) -> 'MonitorDecision':
         service_name = snapshot.service_name
@@ -197,6 +206,11 @@ class MonitorDecision:
         if swarm_services:
             if service_name in swarm_services:
                 unit_config = swarm_services[service_name]
+                if cls.is_excluded_for_host(unit_config, hostname):
+                    return cls(
+                        result=cls.Result.SKIP,
+                        reason=f"swarm service {service_name} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this swarm service."
+                    )
                 return cls(
                     result=cls.Result.MONITOR,
                     reason=f"monitored via config.yaml",
@@ -206,6 +220,12 @@ class MonitorDecision:
                 )
             if stack_name and stack_name in swarm_services:
                 unit_config = swarm_services[stack_name]
+                if cls.is_excluded_for_host(unit_config, hostname):
+                    return cls(
+                        result=cls.Result.SKIP,
+                        reason=f"swarm service {stack_name} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this swarm service."
+                    )
+
                 return cls(
                     result=cls.Result.MONITOR,
                     reason=f"monitored via config.yaml",
@@ -278,7 +298,7 @@ class MonitorDecision:
         # Check explicit config
         if cname in containers:
             unit_config = containers[cname]
-            if hostname and unit_config.hosts and not any(hn.strip() == hostname for hn in unit_config.hosts.split(",")):
+            if cls.is_excluded_for_host(unit_config, hostname):
                 return cls(
                     result=cls.Result.SKIP,
                     reason=f"container {cname} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this container."
@@ -352,7 +372,7 @@ class MonitorDecision:
                 )
             else:
                 unit_config = containers[ctx.config_key]
-                if hostname and unit_config.hosts and not any(hn.strip() == hostname for hn in unit_config.hosts.split(",")):
+                if cls.is_excluded_for_host(unit_config, hostname):
                     return cls(
                         result=cls.Result.STOP_MONITORING,
                         reason=f"container {ctx.config_key} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Stopping monitoring for this container."
@@ -380,6 +400,7 @@ class MonitorDecision:
         cls,
         ctx: 'MonitoredContainerContext',
         new_config: GlobalConfig,
+        hostname: str,
     ) -> 'MonitorDecision':
         # Label-based configs are not affected by config reloads
         if ctx.config_via_labels:
@@ -416,6 +437,13 @@ class MonitorDecision:
                     result=cls.Result.STOP_MONITORING,
                     reason="not present in current config"
                 )
+            else:
+                unit_config = swarm_services[ctx.config_key]
+                if cls.is_excluded_for_host(unit_config, hostname):
+                    return cls(
+                        result=cls.Result.STOP_MONITORING,
+                        reason=f"swarm service {ctx.config_key} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Stopping monitoring for this swarm service."
+                    )
 
         # Still should be monitored - get updated config
         unit_config = swarm_services.get(ctx.config_key)

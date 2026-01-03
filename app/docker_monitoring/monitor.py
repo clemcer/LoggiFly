@@ -37,8 +37,15 @@ class MonitoredContainerContext:
     (threads, events, processor, etc.).
     """
 
-    def __init__(self, snapshot: ContainerSnapshot, config_key: str,
-                 unit_config, config_via_labels: bool):
+    def __init__(
+        self, 
+        snapshot: ContainerSnapshot, 
+        config_key: str,
+        unit_config, 
+        config_via_labels: bool,
+        host_identifier: str | None,
+        hostname: str
+        ):
         """
         Initialize monitoring context for a container.
 
@@ -59,6 +66,9 @@ class MonitoredContainerContext:
         self.container_name = snapshot.name
         self.container_id = snapshot.id
 
+        self.host_identifier = host_identifier
+        self.hostname = hostname
+
         # Runtime state
         self.generation = 0  # Used to track container restarts
         self.stop_monitoring_event = threading.Event()  # Signal to stop monitoring
@@ -67,7 +77,7 @@ class MonitoredContainerContext:
         self.processor = None  # Will be set after initialization
         self.currently_configured = True
         self.not_monitored_since: datetime | None = None # time when the container was last monitored. needed for context cleanup
-
+        
     def set_processor(self, processor):
         self.processor = processor
 
@@ -181,18 +191,32 @@ class DockerLogMonitor:
     Handles config reloads, container start/stop, and log processing.
     """
     
-    def __init__(self, config, client, hostname, host):
+    def __init__(self, config, client, hostname, host_url, multi_host: bool = False):
         """Initialize Docker log monitor for a specific host."""
-        self.hostname = hostname  # empty string if only one client is being monitored, otherwise the hostname of the client do differentiate between the hosts
-        self.host = host
+        self.hostname = hostname
+        self.host_url = host_url
+        self.multi_host = multi_host
         self.config = config
         self.client = client
+
         self.swarm_mode = os.getenv("LOGGIFLY_MODE", "").strip().lower() == "swarm"
-        self._init_swarm_mode()
-        self._init_logging()
+        self.swarm_node: str | None = self._init_swarm_mode()
+
+        if self.swarm_node:
+            self.host_identifier = self.swarm_node
+            formatter = logging.Formatter(f'%(asctime)s - %(levelname)s - [Swarm: {self.swarm_node}] - %(message)s')
+        elif self.multi_host:
+            self.host_identifier = self.hostname
+            formatter = logging.Formatter(f'%(asctime)s - %(levelname)s - [Host: {self.hostname}] - %(message)s')
+        else:
+            self.host_identifier = None
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        self._init_logging(formatter)
+
         if self.swarm_mode:
             self.logger.info(f"Running in swarm mode.")
 
+        self.loggifly_notification_title = f"[{self.host_identifier}] - LoggiFly" if self.host_identifier else "LoggiFly"
         self.event_stream = None
         self.shutdown_event = threading.Event()
         self.cleanup_event = threading.Event()
@@ -207,9 +231,11 @@ class DockerLogMonitor:
         self._start_cleanup_thread()
 
 
-    def _init_swarm_mode(self):
+    def _init_swarm_mode(self) -> str | None:
+        # TODO: deprecate env variable LOGGIFLY_MODE?
         if self.swarm_mode:
-            # Find out if manager or worker and set hostname to differentiate between the instances
+            # Find out if manager or worker and set host_identifier to differentiate between the instances
+            identifier = None
             try:
                 swarm_info = self.client.info().get("Swarm")
                 node_id = swarm_info.get("NodeID")
@@ -223,24 +249,25 @@ class DockerLogMonitor:
                 except Exception as e:
                     manager = False
                 try:
-                    self.hostname = ("manager" if manager else "worker") + "@" + self.client.info()["Name"]
+                    identifier = ("manager" if manager else "worker") + "@" + self.client.info()["Name"]
                 except Exception as e:
-                    self.hostname = ("manager" if manager else "worker") + "@" + socket.gethostname()
-    
-    def _init_logging(self):
+                    identifier = ("manager" if manager else "worker") + "@" + socket.gethostname()
+            if identifier is None:
+                identifier = self.hostname
+        return None
+
+
+    def _init_logging(self, formatter: logging.Formatter):
         """Configure logger to include hostname for multi-host or swarm setups."""
         self.logger = logging.getLogger(f"Monitor-{self.hostname}")
         self.logger.handlers.clear()
         handler = logging.StreamHandler()
-        formatter = (
-            logging.Formatter(f'%(asctime)s - %(levelname)s - [Host: {self.hostname}] - %(message)s')
-            if self.hostname else logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
         self.log_level = self.config.settings.log_level.upper()
         self.logger.setLevel(getattr(logging, self.log_level, logging.INFO))
         self.logger.propagate = False
+
 
     def _start_cleanup_thread(self):
         def cleanup_stale_contexts():
@@ -258,14 +285,6 @@ class DockerLogMonitor:
         with self.threads_lock:
             self.threads.append(thread)
 
-    def _build_decision(self, snapshot: ContainerSnapshot, skip_labels: bool = False) -> MonitorDecision:
-        return MonitorDecision.evaluate(
-            snapshot=snapshot,
-            global_config=self.config,
-            hostname=self.hostname,
-            skip_labels=skip_labels,
-        )
-
     def _maybe_monitor_container(self, container, skip_labels=False) -> bool:
         """
         Check if a container should be monitored and start monitoring if so.
@@ -280,7 +299,12 @@ class DockerLogMonitor:
         # Create snapshot and evaluate decision
         try:
             snapshot = ContainerSnapshot.from_container(container, self.client)
-            decision = self._build_decision(snapshot, skip_labels)
+            decision = MonitorDecision.evaluate(
+                snapshot=snapshot,
+                global_config=self.config,
+                hostname=self.hostname,
+                skip_labels=skip_labels,
+            )
         except ValueError as e:
             self.logger.error(f"Configuration validation error for container {container.name}: {e}")
             return False
@@ -359,7 +383,9 @@ class DockerLogMonitor:
             snapshot=snapshot,
             config_key=decision.config_key,
             unit_config=decision.unit_config,
-            config_via_labels=decision.config_via_labels
+            config_via_labels=decision.config_via_labels,
+            host_identifier=self.host_identifier,
+            hostname=self.hostname,
         )
         self._registry.add(ctx)
         # Create a log processor for this container
@@ -368,7 +394,6 @@ class DockerLogMonitor:
             self.config,
             unit_context=ctx,
             monitor_instance=self,
-            hostname=self.hostname,
             unit_config=ctx.unit_config
         )
         # Add the processor to the container context
@@ -479,8 +504,8 @@ class DockerLogMonitor:
         if not monitored_container_names and not unmonitored_containers and not monitored_swarm_service_units and not unmonitored_swarm_services:
             messages.append("No containers are configured.")
         message = "\n\n".join(messages)
-        if self.hostname:
-            message = f"[{self.hostname}]\n" + message
+        if self.host_identifier:
+            message = f"[{self.host_identifier}]\n" + message
         return message
 
     def _handle_error(self, error_count, last_error_time, container_name=None):
@@ -504,10 +529,10 @@ class DockerLogMonitor:
                 if not self.client.ping():
                     disconnected = True
             except Exception as e:
-                logging.error(f"Error while trying to ping Docker Host {self.host}: {e}")
+                logging.error(f"Error while trying to ping Docker Host {self.host_url}: {e}")
                 disconnected = True
             if disconnected and not self.shutdown_event.is_set():
-                self.logger.error(f"Connection lost to Docker Host {self.host} ({self.hostname if self.hostname else ''}).")
+                self.logger.error(f"Connection lost to Docker Host {self.host_url} ({self.hostname if self.hostname else ''}).")
                 self.cleanup(timeout=30)
             return error_count, last_error_time, True  # True = to_many_errors (break while loop)
 
@@ -671,7 +696,7 @@ class DockerLogMonitor:
                                     else:
                                         unit_name = container_name
                                     # TODO: maybe add template fields
-                                    send_notification(self.config, title="Loggifly", message=f"Monitoring new container: {unit_name}", hostname=self.hostname)
+                                    send_notification(self.config, title=self.loggifly_notification_title, message=f"Monitoring new container: {unit_name}")
 
                         elif event.get("Action") == "stop":
                             if ctx := self._registry.get_by_id(container_id):
@@ -727,6 +752,7 @@ class DockerLogMonitor:
             monitor_type=ctx.monitor_type,
             container_snapshot=ctx.snapshot,
             event=event_type,
+            host_identifier=self.host_identifier,
             hostname=self.hostname,
             time=event.get("time"),
             exit_code=exit_code,
