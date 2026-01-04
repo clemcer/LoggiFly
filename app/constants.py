@@ -91,28 +91,36 @@ MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS = {
     "destroy": "destroy",
     "healthy": "health_status: healthy",
     "unhealthy": "health_status: unhealthy",
-    "oom": "oom"
+    "oom": "oom",
+    "kill": "kill",
+    "create": "create",
+    "restart": "restart"
 }
 
 MAP_EVENT_TO_TITLE = {
-    "start": "Container '{unit_name}' started",
-    "stop": "Container '{unit_name}' stopped",
-    "die": "Container '{unit_name}' crashed",
-    "crash": "Container '{unit_name}' crashed",
-    "destroy": "Container '{unit_name}' destroyed",
-    "healthy": "Container '{unit_name}' is healthy",
-    "unhealthy": "Container '{unit_name}' is unhealthy",
-    "oom": "'{unit_name}': Out Of Memory"
+    "start":    "Container '{unit_name}' started",
+    "stop":     "Container '{unit_name}' stopped (requested)",
+    "die":      "Container '{unit_name}' exited",
+    "crash":    "Container '{unit_name}' crashed",
+    "destroy":  "Container '{unit_name}' removed",
+    "healthy":  "Container '{unit_name}' is healthy",
+    "unhealthy":"Container '{unit_name}' is unhealthy",
+    "oom":      "Container '{unit_name}' was OOM-killed",
+    "kill":     "Container '{unit_name}' was killed",
+    "create":   "Container '{unit_name}' was created",
+    "restart":  "Container '{unit_name}' was restarted",
 }
 
 MAP_EVENT_TO_MESSAGE = {
-    "start": "Container '{unit_name}' was started.",
-    "stop": "Container '{unit_name}' was stopped.",
-    "die": "Container '{unit_name}' died with exit code: {exit_code}.",
-    "crash": "Container '{unit_name}' crashed. Exit code: {exit_code}.",
-    "destroy": "Container '{unit_name}' was destroyed.",
-    "healthy": "Container '{unit_name}' is healthy.",
-    "unhealthy": "Container '{unit_name}' is unhealthy.",
-    "oom": "'Container {unit_name}' ran out of memory"
-
+    "start":     "Container '{unit_name}' was started.",
+    "stop":      "Container '{unit_name}' was stopped by a stop request.",
+    "die":       "Container '{unit_name}' exited. Exit code: {exit_code}.",
+    "crash":     "Container '{unit_name}' exited unexpectedly. Exit code: {exit_code}.",
+    "destroy":   "Container '{unit_name}' was removed.",
+    "healthy":   "Health status for container '{unit_name}' changed to healthy.",
+    "unhealthy": "Health status for container '{unit_name}' changed to unhealthy.",
+    "oom":       "Container '{unit_name}' was killed due to out-of-memory (OOM).",
+    "kill":      "Container '{unit_name}' was killed (signal: {signal}).",
+    "create":    "Container '{unit_name}' was created.",
+    "restart":   "Container '{unit_name}' was restarted.",
 }

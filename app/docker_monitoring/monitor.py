@@ -13,8 +13,8 @@ import docker.errors
 from datetime import datetime, timedelta
 from notifier import send_notification
 from line_processor import LogProcessor
-from config.config_model import GlobalConfig
-from config.config_model import DockerEventConfig
+from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfig
+from config.config_model import ContainerEventConfig
 from config.load_config import get_pretty_yaml_config
 from constants import (
     Actions,
@@ -41,7 +41,7 @@ class MonitoredContainerContext:
         self, 
         snapshot: ContainerSnapshot, 
         config_key: str,
-        unit_config, 
+        unit_config: ContainerConfig | SwarmServiceConfig, 
         config_via_labels: bool,
         host_identifier: str | None,
         hostname: str
@@ -317,8 +317,8 @@ class DockerLogMonitor:
         if not decision.should_monitor:
             if decision.result == MonitorDecision.Result.SKIP:
                 self.logger.debug(f"Skipping {snapshot.name}: {decision.reason}")
-            elif decision.result == MonitorDecision.Result.NOT_CONFIGURED:
-                self.logger.debug(f"Not monitoring {snapshot.name}: {decision.reason}")
+            # elif decision.result == MonitorDecision.Result.NOT_CONFIGURED:
+            #     self.logger.debug(f"Not monitoring {snapshot.name}: {decision.reason}")
             elif decision.result == MonitorDecision.Result.STOP_MONITORING:
                 self.logger.debug(f"Stop Monitoring {snapshot.name}: {decision.reason}")
             return False
@@ -677,8 +677,7 @@ class DockerLogMonitor:
                         container_id = event["Actor"]["ID"]
                         container_name = event["Actor"].get("Attributes", {}).get("name", "")
                         
-                       # self.logger.debug(f"Docker Event Handler: Event: {event}, Container Name: {container_name}")
-                        
+                        self.logger.debug(f"Event: {event}")                        
                         if event_time_ns := event.get("timeNano"):
                             last_seen_time = int(event_time_ns / 1_000_000_000)
                         elif event_time := event.get("time"):
@@ -731,9 +730,9 @@ class DockerLogMonitor:
         """
         Process a Docker event.
         """
-        configured_events: list[DockerEventConfig] = ctx.unit_config.events
-        if not configured_events:
+        if not ctx.unit_config.container_events:
             return
+        configured_events: list[ContainerEventConfig] = ctx.unit_config.container_events
         event_type = parse_event_type(event)
         if not event_type:
             return
@@ -746,6 +745,7 @@ class DockerLogMonitor:
         trigger_level_config = ce.model_dump()
         merged_modular_settings = merge_modular_settings(trigger_level_config, unit_modular_settings)
         exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
+        signal = event.get("Actor", {}).get("Attributes", {}).get("signal", None)
         notification_context = NotificationContext(
             notification_type=NotificationType.DOCKER_EVENT,
             unit_name=ctx.unit_name,
@@ -756,6 +756,7 @@ class DockerLogMonitor:
             hostname=self.hostname,
             time=event.get("time"),
             exit_code=exit_code,
+            signal=signal,
         )
         process_trigger(
             logger=self.logger,
