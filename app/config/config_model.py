@@ -277,7 +277,7 @@ class KeywordBase(BaseModel):
         return data
 
 
-class DockerEventConfig(ModularSettings):
+class ContainerEventConfig(ModularSettings):
     event: Literal[*SUPPORTED_EVENTS] # type: ignore
     action: Optional[str] = None
     olivetin_actions: Optional[List[OliveTinAction]] = None
@@ -302,15 +302,15 @@ class ContainerConfig(KeywordBase, ModularSettings):
     Allows targeting specific hosts when multiple Docker hosts are configured.
     """
     hosts: Optional[str] = None
-    events: Optional[List[DockerEventConfig]] = None
+    container_events: Optional[List[ContainerEventConfig]] = None
     
     @field_validator("ntfy_priority", mode="before")
     def validate_priority(cls, v):
         return validate_priority(v)
 
-    @field_validator("events", mode="before")
+    @field_validator("container_events", mode="before")
     def validate_events(cls, v):
-        return validate_events(v)
+        return validate_container_events(v)
 
 class SwarmServiceConfig(KeywordBase, ModularSettings):
     """
@@ -319,11 +319,11 @@ class SwarmServiceConfig(KeywordBase, ModularSettings):
     """
     _DISALLOW_ACTION: ClassVar[bool] = True
     hosts: Optional[str] = None
-    events: Optional[List[DockerEventConfig]] = None
+    container_events: Optional[List[ContainerEventConfig]] = None
 
-    @field_validator("events", mode="before")
+    @field_validator("container_events", mode="before")
     def validate_events(cls, v):
-        return validate_events(v)
+        return validate_container_events(v)
 
 class GlobalKeywords(BaseConfigModel, KeywordBase):
     """Global keyword configuration that applies to all monitored containers."""
@@ -541,21 +541,21 @@ def get_kw_or_rgx(item):
             return f"keyword_group: '{item['keyword_group']}'"
     return "unknown"
 
-def validate_events(v):
+def validate_container_events(v):
     if not v:
         return v
     converted = []
     if v and isinstance(v, list):
         for event in v:
             if not isinstance(event, dict) or "event" not in event:
-                logging.warning(f"Ignoring Error in config in field 'events': '{event}' is not a dict or does not have an 'event' key.")
+                logging.warning(f"Ignoring Error in config in field 'container_events': '{event}' is not a dict or does not have an 'event' key.")
                 continue
             if event["event"] not in SUPPORTED_EVENTS:
-                logging.warning(f"Ignoring Error in config in field 'events': '{event['event']}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                logging.warning(f"Ignoring Error in config in field 'container_events': '{event['event']}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
                 continue
             converted.append(event)
     else:
-        logging.warning("Events: expected a list, got %r – ignoring", v)
+        logging.warning("Container Events: expected a list, got %r – ignoring", v)
         return None
     return converted
 

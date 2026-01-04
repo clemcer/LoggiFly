@@ -118,6 +118,7 @@ class NotificationContext:
     keywords_found: List[str] = field(default_factory=list)
     event: Optional[str] = None
     exit_code: Optional[int] = None
+    signal: Optional[str] = None
     action_result: Optional[str] = None
     extra_fields: Dict[str, Any] = field(default_factory=dict)
     time: Optional[int | float] = None
@@ -159,6 +160,7 @@ class NotificationContext:
             "swarm_service_name": self.swarm_service_name,
             "stack_name": self.stack_name,
             "unit_name": self.unit_name,
+            "container": self.unit_name, # legacy template field    
             "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
             "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
             "event": self.event,
@@ -172,6 +174,7 @@ class NotificationContext:
             "time": dt.strftime("%H:%M:%S"),
             "datetime": dt.strftime("%Y-%m-%d %H:%M:%S"),
             "exit_code": self.exit_code,
+            "signal": self.signal,
             "action_result": self.action_result,
         }
 
