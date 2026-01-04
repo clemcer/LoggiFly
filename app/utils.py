@@ -19,7 +19,7 @@ def merge_with_precedence(
     *,
     keys: list[str] | tuple[str, ...] | None = None,
     list_union: bool = True,
-    no_list_union: list[str] = [],
+    no_list_union: list[str] | None = None,
     dict_merge: bool = False,
 ) -> dict:
     """
@@ -33,6 +33,7 @@ def merge_with_precedence(
     - Dicts: shallow merge, precedence overrides; nested dicts merged recursively.
     - Keys: if provided, only these keys are considered (maintains schema alignment).
     """
+    no_list_union = no_list_union or []
     precedence = precedence or {}
     fallback = fallback or {}
     considered_keys = keys if keys is not None else set(precedence.keys()) | set(fallback.keys())
