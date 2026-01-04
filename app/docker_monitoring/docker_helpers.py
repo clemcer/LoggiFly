@@ -1,5 +1,6 @@
 from config.config_model import GlobalConfig
 from dataclasses import dataclass
+import os
 import re
 import time
 import logging
@@ -245,3 +246,5 @@ def parse_event_type(event: dict) -> str | None:
         return "die"
     return action
 
+def swarm_mode_enabled() -> bool:
+    return os.getenv("LOGGIFLY_MODE", "").strip().lower() == "swarm"
