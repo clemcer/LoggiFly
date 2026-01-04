@@ -73,6 +73,7 @@ class LogProcessor:
         # These are updated in load_config_variables()
         self.multi_line_mode = False 
         self.time_per_keyword = {}
+        self.kw_time_lock = Lock()
 
         self.load_config_variables(config, unit_config)
         
@@ -256,6 +257,21 @@ class LogProcessor:
         self.log_stream_last_updated = time.time()
         self.new_line_event.set()
 
+    def _cooldown_is_expired(self, key: str | tuple[str, ...], notification_cooldown: int, ignore_keyword_time: bool = False) -> bool:
+        """check if the keyword is on cooldown"""
+        if ignore_keyword_time:
+            return True
+        with self.kw_time_lock:
+            if time.time() - self.time_per_keyword.get(key, 0) >= int(notification_cooldown):
+                return True
+            else:
+                return False
+
+    def _set_keyword_time(self, key: str | tuple[str, ...]):
+        """set the keyword time"""
+        with self.kw_time_lock:
+            self.time_per_keyword[key] = time.time()
+
     def _search_keyword(self, log_line, keyword_dict, ignore_keyword_time=False):
         """
         Search for keyword or regex in log_line. Enforce notification cooldown unless ignore_keyword_time is True.
@@ -273,10 +289,10 @@ class LogProcessor:
             if not regex:
                 self.logger.error(f"Regex is empty for {keyword_dict}")
                 return None
-            if ignore_keyword_time or time.time() - self.time_per_keyword.get(regex, 0) >= int(notification_cooldown):
+            if self._cooldown_is_expired(regex, notification_cooldown, ignore_keyword_time):
                 match = re.search(regex, log_line, re.IGNORECASE)
                 if match:
-                    self.time_per_keyword[regex] = time.time()
+                    self._set_keyword_time(regex)
                     hide_pattern = keyword_dict.get("hide_regex_in_title") if keyword_dict.get("hide_regex_in_title") else self.unit_modular_settings.get("hide_regex_in_title", False)
                     return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
         elif "keyword" in keyword_dict:
@@ -284,18 +300,18 @@ class LogProcessor:
             if not keyword:
                 self.logger.error(f"Keyword is empty for {keyword_dict}")
                 return None
-            if ignore_keyword_time or time.time() - self.time_per_keyword.get(keyword, 0) >= int(notification_cooldown):
+            if self._cooldown_is_expired(keyword, notification_cooldown, ignore_keyword_time):
                 if keyword.lower() in log_line:
-                    self.time_per_keyword[keyword] = time.time()
+                    self._set_keyword_time(keyword)
                     return keyword
         elif "keyword_group" in keyword_dict:
             keyword_group = keyword_dict["keyword_group"]
             if not keyword_group:
                 self.logger.error(f"Keyword group is empty for {keyword_dict}")
                 return None
-            if ignore_keyword_time or time.time() - self.time_per_keyword.get(keyword_group, 0) >= int(notification_cooldown):
+            if self._cooldown_is_expired(keyword_group, notification_cooldown, ignore_keyword_time):
                 if all(keyword.lower() in log_line for keyword in keyword_group):
-                    self.time_per_keyword[keyword_group] = time.time()
+                    self._set_keyword_time(keyword_group)
                     return keyword_group
         return None
 

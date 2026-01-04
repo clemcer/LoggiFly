@@ -200,7 +200,9 @@ class DockerLogMonitor:
         self.client = client
 
         self.swarm_mode: bool = swarm_mode_enabled()
-        self.swarm_node: str | None = self._init_swarm_mode()
+        self.swarm_node = None
+        if self.swarm_mode:
+            self.swarm_node: str | None = self._init_swarm_mode()
 
         if self.swarm_node:
             self.host_identifier = self.swarm_node
@@ -233,27 +235,25 @@ class DockerLogMonitor:
 
     def _init_swarm_mode(self) -> str | None:
         # TODO: deprecate env variable LOGGIFLY_MODE?
-        if self.swarm_mode:
-            # Find out if manager or worker and set host_identifier to differentiate between the instances
-            identifier = None
+        # Find out if manager or worker and set host_identifier to differentiate between the instances
+        identifier = None
+        try:
+            swarm_info = self.client.info().get("Swarm")
+            node_id = swarm_info.get("NodeID")
+        except Exception as e:
+            logging.error(f"Could not get info via docker client. Needed to get info about swarm role (manager/worker)")
+            node_id = None
+        if node_id:
             try:
-                swarm_info = self.client.info().get("Swarm")
-                node_id = swarm_info.get("NodeID")
+                node = self.client.nodes.get(node_id)
+                manager = True if node.attrs["Spec"]["Role"] == "manager" else False
             except Exception as e:
-                logging.error(f"Could not get info via docker client. Needed to get info about swarm role (manager/worker)")
-                node_id = None
-            if node_id:
-                try:
-                    node = self.client.nodes.get(node_id)
-                    manager = True if node.attrs["Spec"]["Role"] == "manager" else False
-                except Exception as e:
-                    manager = False
-                try:
-                    identifier = ("manager" if manager else "worker") + "@" + self.client.info()["Name"]
-                except Exception as e:
-                    identifier = ("manager" if manager else "worker") + "@" + socket.gethostname()
-            return identifier
-        return None
+                manager = False
+            try:
+                identifier = ("manager" if manager else "worker") + "@" + self.client.info()["Name"]
+            except Exception as e:
+                identifier = ("manager" if manager else "worker") + "@" + socket.gethostname()
+        return identifier
 
     def _init_logging(self, formatter: logging.Formatter):
         """Configure logger to include hostname for multi-host or swarm setups."""
@@ -283,13 +283,9 @@ class DockerLogMonitor:
         with self.threads_lock:
             self.threads.append(thread)
 
-    def _maybe_monitor_container(self, container, skip_labels=False) -> bool:
+    def _maybe_monitor_container(self, container: Container) -> bool:
         """
         Check if a container should be monitored and start monitoring if so.
-
-        Args:
-            container: Docker container object
-            skip_labels: If True, ignore container labels (used during config reload)
 
         Returns:
             bool: True if monitoring was started, False otherwise
@@ -301,7 +297,6 @@ class DockerLogMonitor:
                 snapshot=snapshot,
                 global_config=self.config,
                 hostname=self.hostname,
-                skip_labels=skip_labels,
             )
         except ValueError as e:
             self.logger.error(f"Configuration validation error for container {container.name}: {e}")
@@ -318,7 +313,7 @@ class DockerLogMonitor:
             return False
             
         # Self-monitoring check
-        if socket.gethostname() == container.id[:12]:
+        if container.id and socket.gethostname() == container.id[:12]:
             self.logger.warning("LoggiFly cannot monitor itself. Skipping.")
             return False
 
@@ -462,10 +457,10 @@ class DockerLogMonitor:
                     self.logger.debug(f"Updated config for {ctx.unit_name}: {decision.reason}")
             # start monitoring containers that are in the config but not monitored yet
             for container in self.client.containers.list():
-                # Only start monitoring containers that are newly added to the config.yaml, not monitored yet and not configured via labels
+                # Only start monitoring containers that are newly added to the config.yaml and not monitored yet
                 if not (ctx := self._registry.get_by_id(container.id)) or \
                 (ctx.monitoring_stopped_event.is_set() and not ctx.currently_configured):
-                    self._maybe_monitor_container(container, skip_labels=True)
+                    self._maybe_monitor_container(container)
 
             return self._start_message()
         except Exception as e:
