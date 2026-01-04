@@ -71,6 +71,47 @@ containers:
       - keyword: traceback
         action: stop  # I have had container restart loops because kitchenowl couldn't connect to my Authentik Server
 
+
+  fluentbit-kernel:
+    #assuming output from
+    #    command: >
+    #    /fluent-bit/bin/fluent-bit
+    #    -i kmsg -t kernel
+    #    -o stdout -p match=* -p format=json_lines  
+    ntfy_tags: warning
+    ntfy_priority: 3
+    ntfy_topic: server
+    notification_cooldown: 0
+    keywords:
+        - keyword_group:
+            - "\"priority\":4"
+          json_template: "{msg}"
+          notification_title: 'Kernel warning'
+          ntfy_priority: 3
+          ntfy_tags: warning
+          
+        - keyword_group:
+            - "\"priority\":3"
+          json_template: "{msg}"
+          notification_title: 'Kernel error'
+          ntfy_priority: 4
+          ntfy_tags: exclamation
+
+        - keyword_group:
+            - "\"priority\":2"
+          json_template: "{msg}"
+          notification_title: 'Kernel critical error'
+          ntfy_priority: 5
+          ntfy_tags: skull
+
+        - keyword_group:
+            - "\"priority\":1"
+          json_template: "{msg}"
+          notification_title: 'Kernel alert'
+          ntfy_priority: 5
+          ntfy_tags: skull
+
+
 global_keywords:
   keywords:
     - keyword: panic
