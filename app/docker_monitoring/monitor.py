@@ -27,7 +27,7 @@ from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.decision import MonitorDecision
 from docker_monitoring.docker_helpers import (
-    ContainerSnapshot, get_service_info, get_configured, parse_action_target, parse_event_type
+    ContainerSnapshot, get_service_info, get_configured, parse_action_target, parse_event_type, swarm_mode_enabled
 )
 class MonitoredContainerContext:
     """
@@ -199,7 +199,7 @@ class DockerLogMonitor:
         self.config = config
         self.client = client
 
-        self.swarm_mode = os.getenv("LOGGIFLY_MODE", "").strip().lower() == "swarm"
+        self.swarm_mode: bool = swarm_mode_enabled()
         self.swarm_node: str | None = self._init_swarm_mode()
 
         if self.swarm_node:
@@ -252,10 +252,8 @@ class DockerLogMonitor:
                     identifier = ("manager" if manager else "worker") + "@" + self.client.info()["Name"]
                 except Exception as e:
                     identifier = ("manager" if manager else "worker") + "@" + socket.gethostname()
-            if identifier is None:
-                identifier = self.hostname
+            return identifier
         return None
-
 
     def _init_logging(self, formatter: logging.Formatter):
         """Configure logger to include hostname for multi-host or swarm setups."""
@@ -317,10 +315,6 @@ class DockerLogMonitor:
         if not decision.should_monitor:
             if decision.result == MonitorDecision.Result.SKIP:
                 self.logger.debug(f"Skipping {snapshot.name}: {decision.reason}")
-            # elif decision.result == MonitorDecision.Result.NOT_CONFIGURED:
-            #     self.logger.debug(f"Not monitoring {snapshot.name}: {decision.reason}")
-            elif decision.result == MonitorDecision.Result.STOP_MONITORING:
-                self.logger.debug(f"Stop Monitoring {snapshot.name}: {decision.reason}")
             return False
             
         # Self-monitoring check
@@ -427,7 +421,6 @@ class DockerLogMonitor:
     def start(self) -> str:
         for container in self.client.containers.list():
             self._maybe_monitor_container(container)
-
         self._watch_events()
         return self._start_message()
 
@@ -447,14 +440,12 @@ class DockerLogMonitor:
         try:
             # stop monitoring containers that are no longer in the config and update config in line processor instances
             for ctx in list(self._registry.values()):
-
                 # Evaluate whether to continue monitoring with new config
                 decision = MonitorDecision.evaluate_for_reload(
                     ctx=ctx,
                     new_config=self.config,
                     hostname=self.hostname,
                 )
-
                 if decision.should_stop:
                     if not ctx.monitoring_stopped_event.is_set():
                         self.logger.info(f"Stopping monitoring for {ctx.unit_name}: {decision.reason}")
@@ -621,28 +612,18 @@ class DockerLogMonitor:
                         self.logger.error("Error trying to monitor %s: %s", unit_name, e)
                         self.logger.debug(traceback.format_exc())
                 finally:
-                    should_break = False
                     if self.shutdown_event.is_set():
-                        should_break = True
+                        break
                     if gen != container_context.generation:  # if there is a new thread running for this container this thread stops
                         self.logger.debug(f"{unit_name}: Stopping monitoring thread because a new thread was started for this container.")
-                        should_break = True
+                        break
                     elif stop_monitoring_event.is_set() or too_many_errors or not_found_error \
                     or check_container(container_start_time, error_count) is False:
-                        should_break = True
-                    if should_break:
                         break
-                    else:
-                        self.logger.info(f"{unit_name}: Log Stream stopped. Reconnecting... {'error count: ' + str(error_count) if error_count > 0 else ''}")
+                    self.logger.info(f"{unit_name}: Log Stream stopped. Reconnecting... {'error count: ' + str(error_count) if error_count > 0 else ''}")
             self.logger.info(f"Monitoring stopped for container {unit_name}.")
             if log_stream:
-                try:
-                    self.logger.debug(f"Closing log stream for {unit_name} via new method")
-                    log_stream.close()
-                except Exception as e:
-                    self.logger.debug(f"Error trying to close log stream for {unit_name}: {e}")
-            container_context.log_stream = None
-            container_context.not_monitored_since = datetime.now()
+                self._stop_and_close_stream(container_context, wait_for_thread=False)
             stop_monitoring_event.set() 
             monitoring_stopped_event.set()  
 

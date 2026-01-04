@@ -140,7 +140,8 @@ class MonitorDecision:
     def is_excluded_for_host(unit_config: ModelContainerConfig | ModelSwarmServiceConfig, hostname: str) -> bool:
         if not hostname or not unit_config.hosts:
             return False
-        return any(hn.strip() == hostname for hn in unit_config.hosts.split(","))
+        hostnames = [hn.strip() for hn in unit_config.hosts.split(",")]
+        return hostname not in hostnames
 
     @classmethod
     def _evaluate_swarm(
