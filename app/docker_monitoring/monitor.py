@@ -298,9 +298,6 @@ class DockerLogMonitor:
                 global_config=self.config,
                 hostname=self.hostname,
             )
-        except ValueError as e:
-            self.logger.error(f"Configuration validation error for container {container.name}: {e}")
-            return False
         except Exception as e:
             self.logger.error(f"Unexpected error evaluating container {container.name}: {e}")
             self.logger.debug(traceback.format_exc())
@@ -401,8 +398,7 @@ class DockerLogMonitor:
             finally:
                 ctx.log_stream = None
                 ctx.not_monitored_since = datetime.now()
-        if wait_for_thread:
-            if not ctx.monitoring_stopped_event.wait(wait_timeout):
+            if wait_for_thread and not ctx.monitoring_stopped_event.wait(wait_timeout):
                 self.logger.debug(f"Monitoring thread for {ctx.unit_name} did not stop within {wait_timeout} seconds.")
                 return False
         return True
@@ -458,8 +454,8 @@ class DockerLogMonitor:
             # start monitoring containers that are in the config but not monitored yet
             for container in self.client.containers.list():
                 # Only start monitoring containers that are newly added to the config.yaml and not monitored yet
-                if not (ctx := self._registry.get_by_id(container.id)) or \
-                (ctx.monitoring_stopped_event.is_set() and not ctx.currently_configured):
+                ctx = self._registry.get_by_id(container.id)
+                if not ctx or ctx.monitoring_stopped_event.is_set():
                     self._maybe_monitor_container(container)
 
             return self._start_message()
@@ -612,7 +608,7 @@ class DockerLogMonitor:
                     if gen != container_context.generation:  # if there is a new thread running for this container this thread stops
                         self.logger.debug(f"{unit_name}: Stopping monitoring thread because a new thread was started for this container.")
                         break
-                    elif stop_monitoring_event.is_set() or too_many_errors or not_found_error \
+                    if stop_monitoring_event.is_set() or too_many_errors or not_found_error \
                     or check_container(container_start_time, error_count) is False:
                         break
                     self.logger.info(f"{unit_name}: Log Stream stopped. Reconnecting... {'error count: ' + str(error_count) if error_count > 0 else ''}")

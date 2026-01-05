@@ -73,7 +73,7 @@ class Settings(BaseConfigModel):
     disable_start_message: bool = False
     disable_shutdown_message: bool = False
     disable_config_reload_message: bool = False
-    disable_container_event_message: bool = False
+    disable_container_event_message: bool = False # TODO: rename to avoid confusion with container events
     compact_summary_message: bool = False
     reload_config: bool = True
     monitor_all_containers: bool = False
