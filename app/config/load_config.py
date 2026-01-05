@@ -93,26 +93,33 @@ def load_config(official_path="/config/config.yaml"):
     env_config = { "notifications": {}, "settings": {}, "global_keywords": {}}
     settings_values = {
         "log_level": os.getenv("LOG_LEVEL"),
-        "attachment_lines": os.getenv("ATTACHMENT_LINES"),
         "multi_line_entries": os.getenv("MULTI_LINE_ENTRIES"),
-        "notification_cooldown": os.getenv("NOTIFICATION_COOLDOWN"),
-        "notification_title": os.getenv("NOTIFICATION_TITLE"),
         "reload_config": False if config_path is None else os.getenv("RELOAD_CONFIG"), 
         "disable_start_message": os.getenv("DISABLE_START_MESSAGE"),
         "disable_restart_message": os.getenv("DISABLE_RESTART_MESSAGE"),
         "disable_config_reload_message": os.getenv("DISABLE_CONFIG_RELOAD_MESSAGE"),
         "disable_shutdown_message": os.getenv("DISABLE_SHUTDOWN_MESSAGE"),
-        "disable_container_event_message": os.getenv("DISABLE_CONTAINER_EVENT_MESSAGE"),
+        "disable_monitor_event_message": os.getenv("DISABLE_MONITOR_EVENT_MESSAGE"), # previously: disable_container_event_message
+        "compact_summary_message": os.getenv("COMPACT_SUMMARY_MESSAGE"),
         "monitor_all_containers": os.getenv("MONITOR_ALL_CONTAINERS"),
         "monitor_all_swarm_services": os.getenv("MONITOR_ALL_SWARM_SERVICES"),
         "excluded_containers": [c.strip() for c in os.getenv("EXCLUDED_CONTAINERS", "").split(",") if c.strip()] if os.getenv("EXCLUDED_CONTAINERS") else None,
         "excluded_swarm_services": [s.strip() for s in os.getenv("EXCLUDED_SWARM_SERVICES", "").split(",") if s.strip()] if os.getenv("EXCLUDED_SWARM_SERVICES") else None,
-        "action_cooldown": os.getenv("ACTION_COOLDOWN"),
+
+        # legacy settings (converted to new settings in load_config)
+        "notification_title": os.getenv("NOTIFICATION_TITLE"),
+        "disable_container_event_message": os.getenv("DISABLE_CONTAINER_EVENT_MESSAGE"),
+
+        # modular settings
         "attach_logfile": os.getenv("ATTACH_LOGFILE"),
+        "notification_cooldown": os.getenv("NOTIFICATION_COOLDOWN"),
+        "title_template": os.getenv("TITLE_TEMPLATE"), # previously: notification_title
+        "message_template": os.getenv("MESSAGE_TEMPLATE"), # previously: json_template and template
+        "action_cooldown": os.getenv("ACTION_COOLDOWN"),
+        "attachment_lines": os.getenv("ATTACHMENT_LINES"),
         "hide_regex_in_title": os.getenv("HIDE_REGEX_IN_TITLE"),
-        "disable_notifications": os.getenv("DISABLE_NOTIFICATIONS"),
-        "compact_summary_message": os.getenv("COMPACT_SUMMARY_MESSAGE"),
         "excluded_keywords": [kw.strip() for kw in os.getenv("EXCLUDED_KEYWORDS", "").split(",") if kw.strip()] if os.getenv("EXCLUDED_KEYWORDS") else None,
+        "disable_notifications": os.getenv("DISABLE_NOTIFICATIONS"),
         "olivetin_url": os.getenv("OLIVETIN_URL"),
         "olivetin_username": os.getenv("OLIVETIN_USERNAME"),
         "olivetin_password": os.getenv("OLIVETIN_PASSWORD"),
@@ -126,13 +133,17 @@ def load_config(official_path="/config/config.yaml"):
         "priority": os.getenv("NTFY_PRIORITY"),
         "tags": os.getenv("NTFY_TAGS"),
         "username": os.getenv("NTFY_USERNAME"),
-        "password": os.getenv("NTFY_PASSWORD")
+        "password": os.getenv("NTFY_PASSWORD"),
+        "icon": os.getenv("NTFY_ICON"),
+        "click": os.getenv("NTFY_CLICK"),
+        "markdown": os.getenv("NTFY_MARKDOWN"),
+        # actions and headers are currently not supported since they come in dicts
     }
     
     # Webhook settings
     webhook_values = {
         "url": os.getenv("WEBHOOK_URL"),
-        "headers":os.getenv("WEBHOOK_HEADERS")
+        # "headers":os.getenv("WEBHOOK_HEADERS")
     }
     
     # Apprise settings
