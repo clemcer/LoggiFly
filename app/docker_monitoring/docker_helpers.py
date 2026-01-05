@@ -20,7 +20,8 @@ class ContainerSnapshot:
     """
     name: str
     id: str
-    labels: dict  # Container labels
+    labels: dict # Container labels
+    image: str # Image name
 
     # Swarm-specific fields (None for regular containers)
     service_name: str | None = None
@@ -53,6 +54,7 @@ class ContainerSnapshot:
             return cls(
                 name=container.name,
                 id=container.id,
+                image=container.attrs.get("Config", {}).get("Image"),
                 labels=container.labels or {},
                 service_name=service_name,
                 stack_name=stack_name,
@@ -61,6 +63,7 @@ class ContainerSnapshot:
         return cls(
             name=container.name,
             id=container.id,
+            image=container.attrs.get("Config", {}).get("Image"),
             labels=container.labels or {}
         )
 

@@ -124,17 +124,19 @@ class NotificationContext:
     time: Optional[int | float] = None
 
     container_snapshot: Optional[ContainerSnapshot] = None
+    # from snapshot
     container_id: Optional[str] = None
     container_name: Optional[str] = None
     swarm_service_name: Optional[str] = None
     stack_name: Optional[str] = None
-    
-    def __post_init__(self):
-        self.container_id = self.container_snapshot.id if self.container_snapshot else None
-        self.swarm_service_name = self.container_snapshot.service_name if self.container_snapshot else None
-        self.stack_name = self.container_snapshot.stack_name if self.container_snapshot else None
-        self.container_name = self.container_snapshot.name if self.container_snapshot else None
+    image: Optional[str] = None
 
+    def __post_init__(self):
+        self.image = self.image or (self.container_snapshot.image if self.container_snapshot else None)
+        self.container_id = self.container_id or (self.container_snapshot.id if self.container_snapshot else None)
+        self.swarm_service_name = self.swarm_service_name or (self.container_snapshot.service_name if self.container_snapshot else None)
+        self.stack_name = self.stack_name or (self.container_snapshot.stack_name if self.container_snapshot else None)
+        self.container_name = self.container_name or (self.container_snapshot.name if self.container_snapshot else None)
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -160,7 +162,8 @@ class NotificationContext:
             "swarm_service_name": self.swarm_service_name,
             "stack_name": self.stack_name,
             "unit_name": self.unit_name,
-            "container": self.unit_name, # legacy template field    
+            "container": self.unit_name, # legacy template field   
+            "docker_image": self.image,
             "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
             "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
             "event": self.event,
