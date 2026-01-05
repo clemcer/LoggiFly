@@ -181,12 +181,15 @@ def get_service_unit_name(labels) -> str | None:
 
 def parse_label_config(labels: dict) -> dict[str, Any]:
     """Parse LoggiFly configuration from Docker labels."""
+
     keywords_by_index = {}
+    keywords_to_append = []
+    container_events_by_index = {}
+    container_events_to_append = []
     config = {}
     if labels.get("loggifly.monitor", "false").lower() != "true":
         return config
     logging.debug("Parsing loggifly monitor labels...")
-    keywords_to_append = []
     for key, value in labels.items():
         if not key.startswith("loggifly."):
             continue
@@ -195,18 +198,20 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
             # Simple comma-separated keyword list
             if parts[0] == "keywords" and isinstance(value, str):
                 keywords_to_append = [kw.strip() for kw in value.split(",") if kw.strip()]
-            # Top Level Fields (e.g. ntfy_topic, attach_logfile, etc.)
             elif parts[0] == "excluded_keywords" and isinstance(value, str):
                 config["excluded_keywords"] = [kw.strip() for kw in value.split(",") if kw.strip()]
+            elif parts[0] == "container_events" and isinstance(value, str):
+                container_events_to_append = [event.strip() for event in value.split(",") if event.strip()]
+            # Top Level Fields (e.g. ntfy_topic, attach_logfile, etc.)
             else:
                 config[parts[0]] = value
         # Keywords
         elif parts[0] == "keywords":
             index = parts[1]
-            # Simple keywords (direct value instead of dict)
+            # Simple keywords (direct value instead of dict) - loggifly.keywords.1 = value
             if len(parts) == 2:
-                keywords_by_index[index] = value
-            # Complex Keyword (Dict with fields)
+                keywords_by_index.setdefault(index, {})["keyword"] = value 
+            # Complex Keyword (Dict with fields) - loggifly.keywords.1.keyword = value or loggifly.keywords.1.regex = value
             else:
                 field = parts[2]
                 if index not in keywords_by_index:
@@ -217,10 +222,25 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
                     keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
                 else:
                     keywords_by_index[index][field] = value
-    
+        elif parts[0] == "container_events":
+            index = parts[1]
+            # simple event, direct value - loggifly.container_events.1 = event
+            if len(parts) == 2:
+                container_events_by_index.setdefault(index, {})["event"] = value
+            # complex event, dict with fields - loggifly.container_events.1.event = event and loggifly.container_events.1.action = action
+            else:
+                field = parts[2]
+                if index not in container_events_by_index:
+                    container_events_by_index[index] = {}
+                container_events_by_index[index][field] = value
     config["keywords"] = [keywords_by_index[k] for k in sorted(keywords_by_index)]
     if keywords_to_append:
         config["keywords"].extend(keywords_to_append)
+
+    if container_events_by_index or container_events_to_append:
+        config["container_events"] = [container_events_by_index[k] for k in sorted(container_events_by_index)]
+        if container_events_to_append:
+            config["container_events"].extend(container_events_to_append)    
     logging.debug(f"Parsed config: {config}")
     return config
 

@@ -84,9 +84,8 @@ class Settings(BaseConfigModel):
     # modular settings:
     attach_logfile: bool = False
     notification_cooldown: int = 5
-    # notification_title: Optional[str] = None # legacy
-    title_template: Optional[str] = None
-    message_template: Optional[str] = None
+    title_template: Optional[str] = None # previously: notification_title
+    message_template: Optional[str] = None # previously: json_template and template
     action_cooldown: Optional[int] = 300
     attachment_lines: int = 20
     hide_regex_in_title: Optional[bool] = False
@@ -124,7 +123,6 @@ class ModularSettings(BaseConfigModel):
 
     attachment_lines: Optional[int] = None
     notification_cooldown: Optional[int] = None
-    # notification_title: Optional[str] = None # legacy
     title_template: Optional[str] = None
     message_template: Optional[str] = None
     action_cooldown: Optional[int] = None
@@ -228,12 +226,12 @@ class KeywordGroup(KeywordItemBase):
 
 class KeywordBase(BaseModel):
     """Base class for keyword configuration with validation logic."""
-    _DISALLOW_ACTION: ClassVar[bool] = False
+    _DISALLOW_SELF_CONTAINER_ACTION: ClassVar[bool] = False
 
     keywords: List[Union[str, KeywordItem, RegexItem, KeywordGroup]] = []
 
     @model_validator(mode="before")
-    def int_to_string(cls, data: dict) -> dict:
+    def validate_keywords(cls, data: dict) -> dict:
         """
         Convert integer keywords to strings and filter out misconfigured entries before validation.
         Also validates actions and regex patterns.
@@ -256,13 +254,9 @@ class KeywordBase(BaseModel):
                     # Validate and convert fields
                     for key in keys:
                         if key == "action":
-                            if (not isinstance(item["action"], str) 
-                            or not 0 < len(item["action"].split('@')) < 3 
-                            or item["action"].split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS):
-                                logging.warning(f"Ignoring Error in config in field {get_kw_or_rgx(item)}: Invalid action: '{item['action']}'.")
-                                item["action"] = None
-                            elif cls._DISALLOW_ACTION and len(item["action"].split('@')) < 2:
-                                logging.warning(f"Actions on swarm containers/services are not allowed. Removing action '{item['action']}' for {get_kw_or_rgx(item)}")
+                            valid, error = is_valid_container_action(item["action"], disallow_self_action=cls._DISALLOW_SELF_CONTAINER_ACTION)
+                            if not valid:
+                                logging.warning(f"Error in config in field {get_kw_or_rgx(item)}: Invalid action: {error}")
                                 item["action"] = None
                         if isinstance(item[key], int):
                             item[key] = str(item[key])
@@ -294,37 +288,63 @@ class ContainerEventConfig(ModularSettings):
         if v and v.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
             return None
         return v    
+    
+class ContainerEventBase(BaseConfigModel):
+    container_events: Optional[List[ContainerEventConfig]] = None
+    _DISALLOW_SELF_CONTAINER_ACTION: ClassVar[bool] = False
 
+    @model_validator(mode="before")
+    def validate_container_events(cls, data: dict) -> dict:
+        if "container_events" in data and isinstance(data["container_events"], list):
+            converted = []
+            for item in data["container_events"]:
+                if isinstance(item, str):
+                    if item.strip() not in SUPPORTED_EVENTS:
+                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                        continue
+                    converted.append({
+                        "event": item.strip(),
+                    })
+                elif isinstance(item, dict):
+                    if not item.get("event"):
+                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                        continue
+                    if item["event"] not in SUPPORTED_EVENTS:
+                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item['event']}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                        continue
+                    for key in item.keys():
+                        if key == "action":
+                            valid, error = is_valid_container_action(item["action"], disallow_self_action=cls._DISALLOW_SELF_CONTAINER_ACTION)
+                            if not valid:
+                                logging.warning(f"Error in config in field 'container_events': Invalid action ('{item['action']}') for event '{item['event']}': {error}")
+                                item["action"] = None
+                        if isinstance(item[key], int):
+                            item[key] = str(item[key])
+                    converted.append(item)
+                else:
+                    logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a string or dict.")
+                    continue
+            data["container_events"] = converted
+        return data
 
-class ContainerConfig(KeywordBase, ModularSettings):    
+class ContainerConfig(KeywordBase, ContainerEventBase, ModularSettings):    
     """
     Model for per-container configuration, including keywords and setting overrides.
     Allows targeting specific hosts when multiple Docker hosts are configured.
     """
     hosts: Optional[str] = None
-    container_events: Optional[List[ContainerEventConfig]] = None
     
     @field_validator("ntfy_priority", mode="before")
     def validate_priority(cls, v):
         return validate_priority(v)
 
-    @field_validator("container_events", mode="before")
-    def validate_events(cls, v):
-        return validate_container_events(v)
-
-class SwarmServiceConfig(KeywordBase, ModularSettings):
+class SwarmServiceConfig(KeywordBase, ContainerEventBase, ModularSettings):
     """
     Model for per-swarm service configuration, inheriting from ContainerConfig.
     Actions on swarm services are not allowed.
     """
-    _DISALLOW_ACTION: ClassVar[bool] = True
+    _DISALLOW_SELF_CONTAINER_ACTION: ClassVar[bool] = True
     hosts: Optional[str] = None
-    container_events: Optional[List[ContainerEventConfig]] = None
-
-    @field_validator("container_events", mode="before")
-    def validate_events(cls, v):
-        return validate_container_events(v)
-
 class GlobalKeywords(BaseConfigModel, KeywordBase):
     """Global keyword configuration that applies to all monitored containers."""
     pass
@@ -337,13 +357,11 @@ class NtfyConfig(BaseConfigModel):
     password: Optional[SecretStr] = None
     priority: Optional[Union[str, int]] = 3
     tags: Optional[str] = "kite,mag"
-    actions: Optional[List[NtfyAction]] = None
     icon: Optional[str] = None
     click: Optional[str] = None
     markdown: Optional[bool] = None
+    actions: Optional[List[NtfyAction]] = None
     headers: Optional[dict] = None
-
-
 
     @field_validator("priority", mode="before")
     def validate_priority(cls, v):
@@ -479,6 +497,16 @@ def validate_action_cooldown(v):
         return 10
     return v
 
+def is_valid_container_action(value, disallow_self_action: bool = False) -> tuple[bool, str]:
+    if not isinstance(value, str):
+        return False, "action must be a string"
+    if not 0 < len(value.split('@')) < 3:
+        return False, "action must be in the format 'action@hostname'"
+    if value.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
+        return False, "action must be one of " + ", ".join(SUPPORTED_CONTAINER_ACTIONS)
+    if disallow_self_action and len(value.split('@')) < 2:
+        return False, "actions on swarm containers/services are not allowed"
+    return True, ""
 
 def validate_priority(v):
     """
