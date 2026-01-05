@@ -12,7 +12,7 @@ from .config_model import (
 )
 from constants import MonitorType
 
-logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class ConfigLoadError(Exception):
@@ -293,6 +293,7 @@ def convert_legacy_formats(config):
 
         # Now perform the migration
         for key in keys_to_migrate:
+            logger.debug(f"Migrating field {key} to {new}")
             config_copy[new] = config_copy.pop(key)
 
         return config_copy
@@ -301,6 +302,7 @@ def convert_legacy_formats(config):
     config_copy = _migrate_field_names(config_copy, "notification_title", "title_template", exclude_values=["default"])
     config_copy = _migrate_field_names(config_copy, "json_template", "message_template")
     config_copy = _migrate_field_names(config_copy, "template", "message_template")
+    config_copy = _migrate_field_names(config_copy, "disable_container_event_message", "disable_monitor_event_message")
     
     # Migrate global keywords_with_attachment
     global_kw = config_copy.get("global_keywords", {})
