@@ -9,16 +9,11 @@ from pydantic import (
 )
 from typing import Literal
 from enum import Enum
-from constants import Actions, MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS
+from constants import SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_EVENTS
 from typing import List, Optional, Union, ClassVar, Annotated, Any
 import logging
 import re
 import copy
-
-
-SUPPORTED_CONTAINER_ACTIONS: tuple[str, ...] = tuple(action.value for action in Actions)
-SUPPORTED_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
-
 
 class BaseConfigModel(BaseModel):
     """Base configuration model with common Pydantic settings."""

@@ -4,7 +4,11 @@ import os
 import re
 import time
 import logging
-from typing import Any
+from typing import Any, Optional
+from docker.models.containers import Container
+from docker.client import DockerClient
+import socket
+from constants import Actions
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +71,27 @@ class ContainerSnapshot:
             labels=container.labels or {}
         )
 
+@dataclass
+class ContainerActionResult:
+    """Result of a container action attempt"""
+    success: bool
+    message: str
+    action_name: str
+    is_on_cooldown: bool = False
+
+    @classmethod
+    def succeeded(cls, message: str, action_name: str) -> 'ContainerActionResult':
+        return cls(success=True, message=message, action_name=action_name)
+
+    @classmethod
+    def failed(cls, error: str, action_name: str) -> 'ContainerActionResult':
+        return cls(success=False, message=error, action_name=action_name)
+
+    @classmethod
+    def on_cooldown(cls, action_name: str) -> 'ContainerActionResult':
+        return cls(success=False, message=f"Action {action_name} is on cooldown", is_on_cooldown=True, action_name=action_name)
+
+
 def cleanup_stale_action_cooldowns(
     action_cooldowns: dict,
     max_age_seconds: int = 86400,  # 24 hours default
@@ -115,6 +140,76 @@ def parse_action_target(action: str, container_name: str) -> tuple:
         return None, None
     return action_name, container_name
 
+
+def validate_container_for_action(
+    container: Container,
+    client: DockerClient,
+) -> None:
+    """
+    Validate container is suitable for actions.
+    
+    Raises:
+        Exception: If container is swarm service or is LoggiFly itself
+    """
+    if get_service_info(container, client):
+        raise Exception(f"Container '{container.name}' belongs to a swarm service.")
+
+    if container.id and socket.gethostname() == container.id[:12]:
+        raise Exception("LoggiFly cannot perform actions on itself.")
+
+
+def container_action(container: Container, action: str, logger: logging.Logger) -> str:
+    """
+    Perform an action on a container (start, stop, restart).
+    
+    Args:
+        container: Container object
+        action: action string
+    Returns:
+        str: Result message describing action outcome to append to a notification title
+    Raises:
+        Exception: If the action fails with a specific error message.
+    """     
+    container_name = container.name if container.name else "unknown container" # necessary for type safety
+    try:
+        container.reload()  
+        logger.debug(f"Performing action '{action}' on container {container_name} with status {container.status}.")
+        if action == Actions.STOP.value:
+            if container.status != "running":
+                raise Exception(f"did not stop {container_name}, container is not running")
+            logger.info(f"Stopping Container: {container_name}.")
+            container.stop()
+            container.wait(timeout=10)
+            container.reload()
+            logger.info(f"Container {container_name} has been stopped: Status: {container.status}")
+            return f"{container_name} has been stopped!"
+        elif action == Actions.RESTART.value:
+            logger.info(f"Restarting Container: {container_name}.")
+            container.restart()
+            container.reload()
+            logger.info(f"Container {container_name} has been restarted. Status: {container.status}")
+            return f"{container_name} has been restarted!"
+        elif action == Actions.START.value:
+            if container.status == "running":
+                raise Exception(f"did not start {container_name}, container is already running")
+            logger.info(f"Starting Container: {container_name}.")
+            container.start()
+            start_time = time.time()
+            while True:
+                container.reload()
+                if container.status == "running":
+                    break
+                if time.time() - start_time > 10:
+                    logger.warning(f"Timeout while waiting for container {container_name} to start.")
+                    raise Exception(f"Timeout while waiting for container {container_name} to start.")
+                time.sleep(1)
+            logger.info(f"Container {container_name} has been started. Status: {container.status}")
+            return f"{container_name} has been started!"
+        else:
+            raise AssertionError(f"did not perform action. Unknown action: {action}")
+    except Exception as e:
+        logger.exception(f"Error while performing container action: {e}")
+        raise Exception(f"did not perform action. Failed to {action} {container_name}. More details in logs.")
 
 
 def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list[str]]:

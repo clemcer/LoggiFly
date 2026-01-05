@@ -180,6 +180,11 @@ class MonitorDecision:
                     f"Labels: {labels_info}"
                 )
             else:
+                if cls.is_excluded_for_host(unit_config, hostname):
+                    return cls(
+                        result=cls.Result.SKIP,
+                        reason=f"swarm service {service_name} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this swarm service."
+                    )
                 return cls(
                     result=cls.Result.MONITOR,
                     reason=f"monitored via {label_source}",
@@ -275,6 +280,11 @@ class MonitorDecision:
                     f"Labels: {snapshot.labels}"
                 )
             else:
+                if cls.is_excluded_for_host(unit_config, hostname):
+                    return cls(
+                        result=cls.Result.SKIP,
+                        reason=f"container {cname} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this container."
+                    )
                 return cls(
                     result=cls.Result.MONITOR,
                     reason="monitored via container labels",

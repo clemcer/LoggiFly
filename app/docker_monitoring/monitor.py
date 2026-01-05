@@ -17,17 +17,19 @@ from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfi
 from config.config_model import ContainerEventConfig
 from config.load_config import get_pretty_yaml_config
 from constants import (
-    Actions,
     MonitorType,
     MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS,
     NotificationType,
+    SUPPORTED_CONTAINER_ACTIONS,
 )
 from utils import convert_to_int, merge_modular_settings
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.decision import MonitorDecision
 from docker_monitoring.docker_helpers import (
-    ContainerSnapshot, get_service_info, get_configured, parse_action_target, parse_event_type, swarm_mode_enabled
+    ContainerSnapshot, get_configured, parse_action_target, 
+    parse_event_type, swarm_mode_enabled, cleanup_stale_action_cooldowns,
+    validate_container_for_action, container_action, ContainerActionResult,
 )
 class MonitoredContainerContext:
     """
@@ -793,82 +795,89 @@ class DockerLogMonitor:
         else:
             self.logger.error(f"Container {container_id} not found. Cannot tail logs.")
             return None
-        
-    def container_action(self, container_name: str, action):
+
+    def perform_container_action(
+        self,
+        modular_settings: dict,
+        action_to_perform: str,
+        triggered_by_container_name: str,
+    ) -> ContainerActionResult:
         """
-        Perform an action on a container (start, stop, restart).
-        
-        Args:
-            monitor_type: MonitorType.CONTAINER or MonitorType.SWARM
-            unit_name: Unique unit name
-            action: Action string (e.g., "restart", "stop@container_name")
-            
+        Perform a container action if configured.
         Returns:
-            str or None: Result message describing action outcome to append to a notification title
+            ContainerActionResult: Result of the container action
         Raises:
-            Exception: If the action fails with a specific error message.
-        """        
-        action_name, container_name = parse_action_target(action, container_name)
-        if not action_name or not container_name:
-            raise Exception(f"did not perform action. Invalid action syntax: {action}")
+            Exception: If the action fails with a specific error message. (TODO: maybe add structured errors)
+        """
 
-        try:
-            container = self.client.containers.get(container_name)
-            if get_service_info(container, self.client):
-                self.logger.error(f"Container {container_name} belongs to a swarm service. Cannot perform action: {action}")
-                raise Exception(f"did not perform action. Container '{container_name}' belongs to a swarm service.")
-            if socket.gethostname() == container.id[:12]:
-                self.logger.warning("LoggiFly can not perform actions on itself. Skipping.")
-                raise Exception("did not perform action. LoggiFly can not perform actions on itself.")
-        except docker.errors.NotFound:
-            self.logger.error(f"Container {container_name} not found. Could not perform action: {action}")
-            raise Exception(f"did not perform action. Container '{container_name}' not found.")
-        except Exception as e:
-            self.logger.error(f"Unexpected error while trying to perform action on container {container_name}: {e}")
-            raise Exception(f"did not perform action. Unexpected error: {e}")
+        def get_cooldown_dict(cooldown_key_container: str) -> dict:
+            if cooldown_key_container not in self.last_action_time_per_container:
+                self.last_action_time_per_container[cooldown_key_container] = {}
+            return self.last_action_time_per_container[cooldown_key_container]
 
-        try:
-            container_name = container.name
-            container.reload()  
-            self.logger.debug(f"Performing action '{action_name}' on container {container_name} with status {container.status}.")
-            if action_name == Actions.STOP.value:
-                if container.status != "running":
-                    self.logger.info(f"not starting container {container_name}. Container {container_name} is not running.")
-                    raise Exception(f"did not stop {container_name}, container is not running")
-                self.logger.info(f"Stopping Container: {container_name}.")
-                container = container
-                container.stop()
-                if container.wait(timeout=10):
-                    container.reload()
-                    self.logger.info(f"Container {container_name} has been stopped: Status: {container.status}")
-                return f"{container_name} has been stopped!"
-            elif action_name == Actions.RESTART.value:
-                self.logger.info(f"Restarting Container: {container_name}.")
-                container = container
-                container.restart()
-                container.reload()
-                self.logger.info(f"Container {container_name} has been restarted. Status: {container.status}")
-                return f"{container_name} has been restarted!"
-            elif action_name == Actions.START.value:
-                if container.status == "running":
-                    self.logger.info(f"Not performing action 'start' on container {container_name}. Container {container_name} is already running.")
-                    raise Exception(f"did not start {container_name}, container is already running")
-                self.logger.info(f"Starting Container: {container_name}.")
-                container = container
-                container.start()
-                start_time = time.time()
-                while True:
-                    container.reload()
-                    if container.status == "running":
-                        break
-                    if time.time() - start_time > 10:
-                        self.logger.warning(f"Timeout while waiting for container {container_name} to start.")
-                        raise Exception(f"Timeout while waiting for container {container_name} to start.")
-                    time.sleep(1)
-                self.logger.info(f"Container {container_name} has been started. Status: {container.status}")
-                return f"{container_name} has been started!"
-        except Exception as e:
-            self.logger.error(f"Failed to {action_name} {container_name}: {e}")
-            raise Exception(f"did not perform action. Failed to {action_name} {container_name}. More details in logs.")
+        cooldown = modular_settings.get("action_cooldown", 300)
+        action_name, container_target = parse_action_target(action_to_perform, triggered_by_container_name)
+        if not action_name or not container_target or action_name not in SUPPORTED_CONTAINER_ACTIONS:
+            self.logger.error(f"Invalid action syntax or action not supported: {action_to_perform}")
+            return ContainerActionResult.failed(
+                f"Container action failed: Invalid action syntax or action not supported: {action_to_perform}",
+                action_to_perform
+            )
 
+        cooldown_key_container = container_target
+        cooldown_key_action = action_name
 
+        with self.last_action_lock:
+            cleanup_stale_action_cooldowns(self.last_action_time_per_container)
+            cooldown_dict = get_cooldown_dict(cooldown_key_container)
+            last_time = cooldown_dict.get(cooldown_key_action, 0)
+            if last_time < time.time() - int(cooldown):
+                should_run_action = True
+                # Set cooldown before action to prevent concurrent execution by other threads
+                cooldown_dict[cooldown_key_action] = time.time()
+            else:
+                # TODO: maybe return message that action is on cooldown? would be appended to notification title
+                should_run_action = False
+                last_action_time = time.strftime("%H:%M:%S", time.localtime(cooldown_dict.get(cooldown_key_action, 0)))
+                self.logger.info(f"Not performing action: '{action_to_perform}'. Action is on cooldown. Action was last performed at {last_action_time}. Cooldown is {cooldown} seconds.")
+                return ContainerActionResult.on_cooldown(action_to_perform)
+
+        # run action outside of lock
+        if should_run_action:
+            result = None
+            try:
+                try:
+                    container: Container = self.client.containers.get(container_target)
+                except docker.errors.NotFound:
+                    self.logger.error(f"Container {container_target} not found. Could not perform action: {action_to_perform}")
+                    result = ContainerActionResult.failed(f"did not perform action. Container '{container_target}' not found.", action_to_perform)
+                    return result
+                except Exception as e:
+                    self.logger.error(f"Unexpected error while trying to perform action on container {container_target}: {e}")
+                    result = ContainerActionResult.failed(f"did not perform action. Unexpected error: {e}", action_to_perform)
+                    return result
+                try:
+                    validate_container_for_action(container, self.client)
+                except Exception as e:
+                    self.logger.error(f"Container {container_target} is not suitable for action: {action_to_perform}. Error: {e}")
+                    result = ContainerActionResult.failed(
+                        f"did not perform action. Container {container_target} is not suitable for action: {action_to_perform}. Error: {e}",
+                        action_to_perform
+                    )
+                    return result
+                try:
+                    action_message = container_action(container, action_name, self.logger) 
+                    result = ContainerActionResult.succeeded(action_message, action_to_perform)
+                    return result
+                except Exception as e:
+                    # already logged in container_action
+                    result = ContainerActionResult.failed(str(e), action_to_perform)
+                    return result
+            finally:
+                if result:
+                    with self.last_action_lock:
+                        cooldown_dict = get_cooldown_dict(cooldown_key_container)
+                        # TODO: should cooldown even be set on errors? currently it is
+                        cooldown_dict[cooldown_key_action] = time.time()
+        self.logger.critical(f"CRITICAL BUG: perform_container_action fell through all code paths for action: {action_to_perform}")
+        return ContainerActionResult.failed("Internal error: invalid code path", action_to_perform)
