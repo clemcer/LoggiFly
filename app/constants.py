@@ -98,6 +98,10 @@ MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS = {
     "restart": "restart"
 }
 
+SUPPORTED_CONTAINER_ACTIONS: tuple[str, ...] = tuple(action.value for action in Actions)
+SUPPORTED_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
+
+
 MAP_EVENT_TO_TITLE = {
     "start":    "Container '{unit_name}' started",
     "stop":     "Container '{unit_name}' stopped (requested)",

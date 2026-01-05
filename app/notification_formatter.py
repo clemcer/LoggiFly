@@ -211,7 +211,7 @@ def render_title(
             title = default_title_for_log_match(ctx.keywords_found, ctx.unit_name)
         elif ctx.notification_type == NotificationType.DOCKER_EVENT:
             if ctx.event:
-                logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')} and context: {context_dict}")
+                logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')}")
                 title, missing = _format_with_safe_dict(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
                 if missing:
                     logging.warning(f"Missing keys in event default title template: {missing}.")
@@ -244,7 +244,7 @@ def render_message(
     context_dict = ctx.to_dict()
 
     if template:
-        logger.debug(f"Rendering message with template: {template} and context: {context_dict}")
+        logger.debug(f"Rendering message with template: {template}")
         rendered, missing = _format_with_safe_dict(template, context_dict)
         if missing:
             logging.warning(f"Missing keys in message template: {missing}.")
