@@ -228,13 +228,13 @@ class DockerLogMonitor:
         self.last_action_lock = threading.Lock()
         self._registry = MonitoredContainerRegistry()
 
-        self.stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS", "24"), fallback_value=24)
-        self.cleanup_interval_minutes = convert_to_int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"), fallback_value=60)
+        self.configured_stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_CONFIGURED", "24"), fallback_value=24*7)
+        self.stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED", "24"), fallback_value=24)
+        self.cleanup_interval_minutes = convert_to_int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"), fallback_value=60, min_value=1)
         self._start_cleanup_thread()
 
 
     def _init_swarm_mode(self) -> str | None:
-        # TODO: deprecate env variable LOGGIFLY_MODE?
         # Find out if manager or worker and set host_identifier to differentiate between the instances
         identifier = None
         try:
@@ -270,7 +270,7 @@ class DockerLogMonitor:
     def _start_cleanup_thread(self):
         def cleanup_stale_contexts():
             while not self.shutdown_event.is_set():
-                removed = self._registry.cleanup_stale_contexts(self.stale_threshold_hours)
+                removed = self._registry.cleanup_stale_contexts(self.stale_threshold_hours, self.configured_stale_threshold_hours)
                 if removed > 0:
                     self.logger.info(f"Removed {removed} stale contexts.")
                 self.shutdown_event.wait(self.cleanup_interval_minutes * 60)
@@ -661,7 +661,7 @@ class DockerLogMonitor:
                                 self.logger.debug(f"Docker Event Handler: Container {container_id} not found.")
                                 continue
                             if self._maybe_monitor_container(container):
-                                if self.config.settings.disable_container_event_message is False:
+                                if self.config.settings.disable_monitor_event_message is False:
                                     if ctx := self._registry.get_by_id(container.id):
                                         unit_name = ctx.unit_name
                                     else:

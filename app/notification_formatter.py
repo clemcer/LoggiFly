@@ -164,8 +164,8 @@ class NotificationContext:
             "unit_name": self.unit_name,
             "container": self.unit_name, # legacy template field   
             "docker_image": self.image,
-            "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
-            "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else "",
+            "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
+            "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
             "event": self.event,
             "hostname": self.hostname,
             "host_identifier": self.host_identifier,

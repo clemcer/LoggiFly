@@ -66,10 +66,10 @@ def merge_modular_settings(precedence: dict, fallback: dict) -> dict:
     return merge_with_precedence(precedence, fallback, keys=possible_keys, list_union=True, no_list_union=["ntfy_actions"])
 
 
-def convert_to_int(val, fallback_value: int = 0) -> int:
+def convert_to_int(val, fallback_value: int = 0, min_value: int = 0) -> int:
     try:
         val = int(val)
-        if val < 0:
+        if val < min_value:
             return fallback_value
         return val
     except ValueError:
