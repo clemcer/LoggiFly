@@ -101,6 +101,7 @@ def load_config(official_path="/config/config.yaml"):
         "disable_shutdown_message": os.getenv("DISABLE_SHUTDOWN_MESSAGE"),
         "disable_monitor_event_message": os.getenv("DISABLE_MONITOR_EVENT_MESSAGE"), # previously: disable_container_event_message
         "compact_summary_message": os.getenv("COMPACT_SUMMARY_MESSAGE"),
+        
         "monitor_all_containers": os.getenv("MONITOR_ALL_CONTAINERS"),
         "monitor_all_swarm_services": os.getenv("MONITOR_ALL_SWARM_SERVICES"),
         "excluded_containers": [c.strip() for c in os.getenv("EXCLUDED_CONTAINERS", "").split(",") if c.strip()] if os.getenv("EXCLUDED_CONTAINERS") else None,

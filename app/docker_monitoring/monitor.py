@@ -27,9 +27,10 @@ from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.decision import MonitorDecision
 from docker_monitoring.docker_helpers import (
-    ContainerSnapshot, get_configured, parse_action_target, 
+    ContainerSnapshot, get_configured, parse_action_target,
     parse_event_type, swarm_mode_enabled, cleanup_stale_action_cooldowns,
     validate_container_for_action, container_action, ContainerActionResult,
+    ContainerActionError, ContainerValidationError,
 )
 class MonitoredContainerContext:
     """
@@ -166,7 +167,7 @@ class MonitoredContainerRegistry:
 
         to_remove = []
         with self._lock:
-            for container_id, ctx in self._by_id.items():
+            for ctx in self._by_id.values():
                 if not ctx.monitoring_stopped_event.is_set():
                     continue
                 if ctx.not_monitored_since is None:
@@ -178,11 +179,11 @@ class MonitoredContainerRegistry:
                 else:
                     if time_since_stopped <= stale_threshold:
                         continue
-                to_remove.append(container_id)
+                to_remove.append(ctx)
 
-        for container_id in to_remove: 
-            self.logger.debug(f"Removing stale context for container {container_id}")
-            self.remove(container_id)
+        for ctx in to_remove: 
+            self.logger.debug(f"Removing stale context for container {ctx.unit_name}")
+            self.remove(ctx.container_id)
         return len(to_remove)
 
 class DockerLogMonitor:
@@ -317,13 +318,14 @@ class DockerLogMonitor:
             return False
 
         # Start monitoring
+        unit_name = snapshot.unit_name
         if decision.config_via_labels:
             self.logger.info(
-                f"Monitoring {snapshot.name} via docker labels.\
-                \nConfig:\n{get_pretty_yaml_config(decision.unit_config, top_level_key=snapshot.name)}"
+                f"Monitoring {unit_name} via docker labels.\
+                \nConfig:\n{get_pretty_yaml_config(decision.unit_config, top_level_key=unit_name)}"
                 )
         else:
-            self.logger.info(f"Starting monitoring for {snapshot.name}: {decision.reason}")
+            self.logger.info(f"Starting monitoring for {unit_name}: {decision.reason}")
 
         container_context = self._prepare_monitored_container_context(container, snapshot, decision)
         container_context.currently_configured = True
@@ -672,7 +674,6 @@ class DockerLogMonitor:
                         container_id = event["Actor"]["ID"]
                         container_name = event["Actor"].get("Attributes", {}).get("name", "")
                         
-                        self.logger.debug(f"Event: {event}")                        
                         if event_time_ns := event.get("timeNano"):
                             last_seen_time = int(event_time_ns / 1_000_000_000)
                         elif event_time := event.get("time"):
@@ -862,7 +863,7 @@ class DockerLogMonitor:
                 should_run_action = False
                 last_action_time = time.strftime("%H:%M:%S", time.localtime(cooldown_dict.get(cooldown_key_action, 0)))
                 self.logger.info(f"Not performing action: '{action_to_perform}'. Action is on cooldown. Action was last performed at {last_action_time}. Cooldown is {cooldown} seconds.")
-                return ContainerActionResult.on_cooldown(action_to_perform)
+                return ContainerActionResult.on_cooldown(f"Action '{action_name}' for container '{container_target}' is on cooldown.", action_to_perform)
 
         # run action outside of lock
         if should_run_action:
@@ -875,25 +876,36 @@ class DockerLogMonitor:
                     result = ContainerActionResult.failed(f"Failed to perform action: Container '{container_target}' not found.", action_to_perform)
                     return result
                 except Exception as e:
-                    self.logger.error(f"Unexpected error while trying to perform action on container {container_target}: {e}")
-                    result = ContainerActionResult.failed(f"Failed to perform action '{action_to_perform}': Unexpected error: {e}", action_to_perform)
+                    self.logger.error(f"Unexpected error for action '{action_to_perform}' on container '{container_target}': {e}")
+                    result = ContainerActionResult.failed(f"Unexpected error for {action_to_perform}. See logs for details.", action_to_perform)
                     return result
                 try:
                     validate_container_for_action(container, self.client)
                 except Exception as e:
                     self.logger.error(f"Container {container_target} is not suitable for action: {action_to_perform}. Error: {e}")
                     result = ContainerActionResult.failed(
-                        f"Container {container_target} is not suitable for action: {action_to_perform}. {e}",
+                        f"Failed to {action_name} {container_target}: {e}",
                         action_to_perform
                     )
                     return result
                 try:
-                    action_message = container_action(container, action_name, self.logger) 
+                    action_message = container_action(container, action_name, self.logger)
                     result = ContainerActionResult.succeeded(action_message, action_to_perform)
                     return result
-                except Exception as e:
-                    # already logged in container_action
+                except ContainerValidationError as e:
+                    # Expected validation failures (wrong state) - info level is sufficient
+                    self.logger.info(f"Container validation failed for {action_to_perform}: {e}")
                     result = ContainerActionResult.failed(str(e), action_to_perform)
+                    return result
+                except ContainerActionError as e:
+                    # Docker operation errors - already logged in container_action
+                    result = ContainerActionResult.failed(str(e), action_to_perform)
+                    return result
+                except Exception as e:
+                    # Truly unexpected errors (shouldn't happen)
+                    self.logger.error(f"Unexpected error performing {action_to_perform}: {e}")
+                    self.logger.debug(traceback.format_exc())
+                    result = ContainerActionResult.failed(f"Unexpected error: {str(e)[:60]}", action_to_perform)
                     return result
             finally:
                 if result:

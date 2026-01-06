@@ -14,6 +14,17 @@ from constants import EMOJI_PATTERN
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
 
+NTFY_KEYS = {
+    "url", "topic", "token", "username", "password", "tags",
+    "priority", "actions", "icon", "click", "markdown", "headers"
+    }
+APPRISE_KEYS = {"url"}
+WEBHOOK_KEYS = {"url", "headers"}
+
+NTFY_PREFIX = "ntfy_"
+APPRISE_PREFIX = "apprise_"
+WEBHOOK_PREFIX = "webhook_"
+
 
 def emoji_to_rfc2047(match):
     """Convert the matched emoji to RFC 2047 encoding."""
@@ -92,15 +103,6 @@ def build_ntfy_action_header(actions: list) -> str:
     logger.debug(f"ACTIONS: {actions}")
     header = ";".join(action_list) if actions else ""
     return header
-
-
-NTFY_KEYS = {
-    "url", "topic", "token", "username", "password", "tags",
-    "priority", "actions", "icon", "click", "markdown", "headers"
-    }
-APPRISE_KEYS = {"url", "apprise_url"}
-WEBHOOK_KEYS = {"url", "headers", "webhook_url", "webhook_headers"}
-
 
 def _normalize_and_strip_prefix(d: dict, prefix: str, keys: set[str]) -> dict:
     """Accept both prefixed (ntfy_url) and bare (url) keys; strip prefix if present."""
@@ -273,7 +275,6 @@ def send_notification(config: GlobalConfig,
                       message: str,
                       modular_settings: dict | None = None,
                       attachment: dict | None = None,
-                    #   hostname: str | None = None,
                       template_fields: dict | None = None
                       ):
     """
@@ -286,9 +287,9 @@ def send_notification(config: GlobalConfig,
     if not config.notifications:
         return
     nc = config.notifications.model_dump(exclude_none=True)
-    ntfy_config = get_notification_config(modular_settings or {}, nc.get("ntfy", {}), "ntfy_", NTFY_KEYS)
-    apprise_url = get_notification_config(modular_settings or {}, nc.get("apprise", {}), "apprise_", APPRISE_KEYS).get("url")
-    webhook_config = get_notification_config(modular_settings or {}, nc.get("webhook", {}), "webhook_", WEBHOOK_KEYS)
+    ntfy_config = get_notification_config(modular_settings or {}, nc.get("ntfy", {}), NTFY_PREFIX, NTFY_KEYS)
+    apprise_url = get_notification_config(modular_settings or {}, nc.get("apprise", {}), APPRISE_PREFIX, APPRISE_KEYS).get("url")
+    webhook_config = get_notification_config(modular_settings or {}, nc.get("webhook", {}), WEBHOOK_PREFIX, WEBHOOK_KEYS)
 
     # Send ntfy notification if configured
     if ntfy_config and ntfy_config.get("url") and ntfy_config.get("topic"):

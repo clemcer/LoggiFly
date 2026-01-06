@@ -159,7 +159,7 @@ class NotificationContext:
         defaults = {
             "container_id": self.container_id,
             "container_name": self.container_name,
-            "swarm_service_name": self.swarm_service_name,
+            "service_name": self.swarm_service_name,
             "stack_name": self.stack_name,
             "unit_name": self.unit_name,
             "container": self.unit_name, # legacy template field   
