@@ -221,13 +221,13 @@ def render_title(
         # Prepend host identifier to title (only exists for multi-host or swarm setups)
         if ctx.host_identifier:
             title = f"[{ctx.host_identifier}] - {title}"
+        if ctx.action_result is not None:
+            title = f"{title} ({ctx.action_result})"
 
     # Safe fallback
     if not title:
         title = f"{ctx.unit_name}: {context_dict.get('keywords') or context_dict.get('event')}"
     # Append action result to title
-    if ctx.action_result is not None:
-        title = f"{title} ({ctx.action_result})"
     return title
 
 

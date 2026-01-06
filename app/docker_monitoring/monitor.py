@@ -466,30 +466,51 @@ class DockerLogMonitor:
         return ""
 
     def _start_message(self) -> str:
-        """Compose a summary message about monitored containers and services."""
-        messages = []
-        separator = ", " if self.config.settings.compact_summary_message else "\n - "
-        prefix = ": " if self.config.settings.compact_summary_message else ":\n - "
-        # TODO: maybe only get info from registry and not display which containers are not monitored?
+        def format_section(title: str, items: list[str], indent: int = 0) -> str:
+            if not items:
+                return ""
+            indent_str = " " * indent if indent > 0 else ""
+            items = sorted(items)
+            if self.config.settings.compact_summary_message:
+                return f"{indent_str}{title}: " + ", ".join(items)
+            return (
+                f"{indent_str}{title}:\n"
+                f"{indent_str} - " + f"\n{indent_str} - ".join(items)
+            )
+
         selected_containers, selected_swarm_services = get_configured(self.config, self.hostname)
-        monitored_container_names = [c.unit_name for c in self._registry.get_actively_monitored(monitor_type=MonitorType.CONTAINER)]
-        unmonitored_containers = [c for c in selected_containers if c not in monitored_container_names]
-        if monitored_container_names:
-            messages.append("These containers are being monitored" + prefix + separator.join(monitored_container_names))
-        if unmonitored_containers:
-            messages.append("These selected containers are not running" + prefix + separator.join(unmonitored_containers))
-        actively_monitored_swarm = [context for context in self._registry.get_actively_monitored(monitor_type=MonitorType.SWARM)]
-        unmonitored_swarm_services = [s for s in selected_swarm_services if s not in [s.config_key for s in actively_monitored_swarm]]
-        monitored_swarm_service_units = [s.unit_name for s in actively_monitored_swarm]
-        if monitored_swarm_service_units:
-            messages.append("These Swarm Containers are being monitored" + prefix + separator.join(monitored_swarm_service_units))
-        if unmonitored_swarm_services:
-            messages.append("These Swarm Services are not running" + prefix + separator.join(unmonitored_swarm_services))
-        if not monitored_container_names and not unmonitored_containers and not monitored_swarm_service_units and not unmonitored_swarm_services:
-            messages.append("No containers are configured.")
-        message = "\n\n".join(messages)
+        # --- Standalone containers ---
+        monitored_containers = [
+            c.unit_name
+            for c in self._registry.get_actively_monitored(monitor_type=MonitorType.CONTAINER)
+        ]
+        monitored_set = set(monitored_containers)
+        configured_not_running = sorted(set(selected_containers) - monitored_set)
+        container_block = "\n\n".join(
+            s for s in [
+                format_section("✅ Running & monitored containers", monitored_containers),
+                format_section("❌ Configured but not running containers", configured_not_running),
+            ]
+            if s
+        )
+        # --- Swarm ---
+        actively_monitored_swarm = list(self._registry.get_actively_monitored(monitor_type=MonitorType.SWARM))
+        monitored_swarm_tasks = [x.unit_name for x in actively_monitored_swarm]
+        monitored_swarm_service_keys = {x.config_key for x in actively_monitored_swarm}
+        swarm_services_not_running = sorted(set(selected_swarm_services) - monitored_swarm_service_keys)
+        swarm_block = "\n\n".join(
+            s for s in [
+                format_section("✅ Running & monitored Swarm tasks (containers)", monitored_swarm_tasks),
+                format_section("❌ Swarm services not running", swarm_services_not_running),
+            ]
+            if s
+        )
+        if not container_block and not swarm_block:
+            message = "❌ No containers or Swarm services are configured."
+        else:
+            message = "\n\n".join(s for s in [container_block, swarm_block] if s)
         if self.host_identifier:
-            message = f"[{self.host_identifier}]\n" + message
+            message = f"[{self.host_identifier}]\n\n{message}"
         return message
 
     def _handle_error(self, error_count, last_error_time, container_name=None):
@@ -818,6 +839,7 @@ class DockerLogMonitor:
         cooldown = modular_settings.get("action_cooldown", 300)
         action_name, container_target = parse_action_target(action_to_perform, triggered_by_container_name)
         if not action_name or not container_target or action_name not in SUPPORTED_CONTAINER_ACTIONS:
+            # should not happen since config is validated
             self.logger.error(f"Invalid action syntax or action not supported: {action_to_perform}")
             return ContainerActionResult.failed(
                 f"Container action failed: Invalid action syntax or action not supported: {action_to_perform}",
@@ -850,18 +872,18 @@ class DockerLogMonitor:
                     container: Container = self.client.containers.get(container_target)
                 except docker.errors.NotFound:
                     self.logger.error(f"Container {container_target} not found. Could not perform action: {action_to_perform}")
-                    result = ContainerActionResult.failed(f"did not perform action. Container '{container_target}' not found.", action_to_perform)
+                    result = ContainerActionResult.failed(f"Failed to perform action: Container '{container_target}' not found.", action_to_perform)
                     return result
                 except Exception as e:
                     self.logger.error(f"Unexpected error while trying to perform action on container {container_target}: {e}")
-                    result = ContainerActionResult.failed(f"did not perform action. Unexpected error: {e}", action_to_perform)
+                    result = ContainerActionResult.failed(f"Failed to perform action '{action_to_perform}': Unexpected error: {e}", action_to_perform)
                     return result
                 try:
                     validate_container_for_action(container, self.client)
                 except Exception as e:
                     self.logger.error(f"Container {container_target} is not suitable for action: {action_to_perform}. Error: {e}")
                     result = ContainerActionResult.failed(
-                        f"did not perform action. Container {container_target} is not suitable for action: {action_to_perform}. Error: {e}",
+                        f"Container {container_target} is not suitable for action: {action_to_perform}. {e}",
                         action_to_perform
                     )
                     return result

@@ -176,7 +176,7 @@ def container_action(container: Container, action: str, logger: logging.Logger) 
         logger.debug(f"Performing action '{action}' on container {container_name} with status {container.status}.")
         if action == Actions.STOP.value:
             if container.status != "running":
-                raise Exception(f"did not stop {container_name}, container is not running")
+                raise Exception(f"Failed to stop {container_name}, container is not running")
             logger.info(f"Stopping Container: {container_name}.")
             container.stop()
             container.wait(timeout=10)
@@ -191,7 +191,7 @@ def container_action(container: Container, action: str, logger: logging.Logger) 
             return f"{container_name} has been restarted!"
         elif action == Actions.START.value:
             if container.status == "running":
-                raise Exception(f"did not start {container_name}, container is already running")
+                raise Exception(f"Failed to start {container_name}, container is already running")
             logger.info(f"Starting Container: {container_name}.")
             container.start()
             start_time = time.time()
@@ -205,11 +205,11 @@ def container_action(container: Container, action: str, logger: logging.Logger) 
                 time.sleep(1)
             logger.info(f"Container {container_name} has been started. Status: {container.status}")
             return f"{container_name} has been started!"
-        else:
-            raise AssertionError(f"did not perform action. Unknown action: {action}")
+        else: # should not happen
+            raise AssertionError(f"Failed to perform action. Unknown action: {action}")
     except Exception as e:
         logger.exception(f"Error while performing container action: {e}")
-        raise Exception(f"did not perform action. Failed to {action} {container_name}. More details in logs.")
+        raise Exception(f"Failed to perform action. Failed to {action} {container_name}. More details in logs.")
 
 
 def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list[str]]:
