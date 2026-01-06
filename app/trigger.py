@@ -26,10 +26,8 @@ def process_trigger(
     # Perform container action if configured
     if action_to_perform is not None:
         action_result = monitor_instance.perform_container_action(modular_settings, action_to_perform, unit_context.container_name)
-        if action_result.is_on_cooldown:
-            pass # TODO: should message for cooldown be added to notification title?
-        else:
-            notification_context.action_result = action_result.message
+        # append action result no matter which outcome
+        notification_context.action_result = action_result.message
     logger.debug(f"\n\nNotification context:\n{notification_context.to_dict()}\n\n")
 
     # Create log file attachment if requested

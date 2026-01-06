@@ -4,9 +4,11 @@ import os
 import re
 import time
 import logging
+import traceback
 from typing import Any, Optional
 from docker.models.containers import Container
 from docker.client import DockerClient
+import docker.errors
 import socket
 from constants import Actions
 
@@ -88,9 +90,33 @@ class ContainerActionResult:
         return cls(success=False, message=error, action_name=action_name)
 
     @classmethod
-    def on_cooldown(cls, action_name: str) -> 'ContainerActionResult':
-        return cls(success=False, message=f"Action {action_name} is on cooldown", is_on_cooldown=True, action_name=action_name)
+    def on_cooldown(cls, message: str, action_name: str) -> 'ContainerActionResult':
+        return cls(success=False, message=message, is_on_cooldown=True, action_name=action_name)
 
+class ContainerActionError(Exception):
+    """Base exception for container action failures"""
+    pass
+
+class ContainerValidationError(ContainerActionError):
+    """Container state is invalid for the requested action"""
+    pass
+
+def format_docker_error(error: Exception) -> str:
+    """
+    Extract user-friendly message from Docker exception.
+            """
+    error_str = str(error)
+    if "403" in error_str or "Forbidden" in error_str:
+        return "Permission denied (403 Forbidden)"
+    if "404" in error_str or "Not Found" in error_str:
+        return "Container not found (404)"
+    if "500" in error_str or "Internal Server Error" in error_str:
+        return "Docker daemon error (500)"
+    if "permission denied" in error_str.lower():
+        return "Permission denied"
+    if "timeout" in error_str.lower():
+        return "Operation timed out"
+    return "See logs for details."
 
 def cleanup_stale_action_cooldowns(
     action_cooldowns: dict,
@@ -161,37 +187,42 @@ def validate_container_for_action(
 def container_action(container: Container, action: str, logger: logging.Logger) -> str:
     """
     Perform an action on a container (start, stop, restart).
-    
+
     Args:
         container: Container object
         action: action string
     Returns:
         str: Result message describing action outcome to append to a notification title
     Raises:
-        Exception: If the action fails with a specific error message.
-    """     
-    container_name = container.name if container.name else "unknown container" # necessary for type safety
+        ContainerValidationError: Container state is invalid for action
+        ContainerActionError: Docker operation failed
+    """
+    container_name = container.name
+
     try:
-        container.reload()  
+        container.reload()
         logger.debug(f"Performing action '{action}' on container {container_name} with status {container.status}.")
+
         if action == Actions.STOP.value:
             if container.status != "running":
-                raise Exception(f"Failed to stop {container_name}, container is not running")
+                raise ContainerValidationError(f"Did not stop {container_name}, container is not running")
             logger.info(f"Stopping Container: {container_name}.")
             container.stop()
             container.wait(timeout=10)
             container.reload()
             logger.info(f"Container {container_name} has been stopped: Status: {container.status}")
             return f"{container_name} has been stopped!"
+
         elif action == Actions.RESTART.value:
             logger.info(f"Restarting Container: {container_name}.")
             container.restart()
             container.reload()
             logger.info(f"Container {container_name} has been restarted. Status: {container.status}")
             return f"{container_name} has been restarted!"
+
         elif action == Actions.START.value:
             if container.status == "running":
-                raise Exception(f"Failed to start {container_name}, container is already running")
+                raise ContainerValidationError(f"Did not start {container_name}, container is already running")
             logger.info(f"Starting Container: {container_name}.")
             container.start()
             start_time = time.time()
@@ -200,16 +231,24 @@ def container_action(container: Container, action: str, logger: logging.Logger) 
                 if container.status == "running":
                     break
                 if time.time() - start_time > 10:
-                    logger.warning(f"Timeout while waiting for container {container_name} to start.")
-                    raise Exception(f"Timeout while waiting for container {container_name} to start.")
+                    raise ContainerValidationError(f"Timeout waiting for {container_name} to start")
                 time.sleep(1)
             logger.info(f"Container {container_name} has been started. Status: {container.status}")
             return f"{container_name} has been started!"
-        else: # should not happen
-            raise AssertionError(f"Failed to perform action. Unknown action: {action}")
+        else:
+            raise AssertionError(f"Unknown action: {action}")
+    except ContainerValidationError:
+        raise
+    except docker.errors.APIError as e:
+        logger.error(f"Docker API error while performing {action} on {container_name}: {e}")
+        logger.debug(traceback.format_exc())
+        error_detail = format_docker_error(e)
+        raise ContainerActionError(f"Failed to {action} {container_name}. {error_detail}")
     except Exception as e:
-        logger.exception(f"Error while performing container action: {e}")
-        raise Exception(f"Failed to perform action. Failed to {action} {container_name}. More details in logs.")
+        logger.error(f"Unexpected error while performing {action} on {container_name}: {e}")
+        logger.debug(traceback.format_exc())
+        error_detail = format_docker_error(e)
+        raise ContainerActionError(f"Failed to {action} {container_name}. {error_detail}")
 
 
 def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list[str]]:
