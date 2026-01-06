@@ -418,6 +418,8 @@ def start_loggifly():
             title=get_title_prefix(docker_hosts) + "LoggiFly started",
             message=message
         )
+    else:
+        logging.info(f"Startup message disabled. {message}")
     
     # Start config observer to catch config.yaml changes
     if config.settings.reload_config and isinstance(path, str) and os.path.exists(path):
