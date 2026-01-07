@@ -41,6 +41,17 @@ containers:
           template: '🚨 Failed login!\n📧 Email: ''{email}''\n🔎 IP Address: {ip_address}\n🕐 {timestamp}'
           hide_pattern_in_title: true # Hide full regex pattern in notification title
 
+  paperless-webserver:
+    ntfy_tags: closed_lock_with_key
+    ntfy_priority: 5
+    ntfy_topic: security
+    notification_title: 'Failed Paperless-ngx login'
+    notification_cooldown: 0
+    keywords:
+        - regex: '.*(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+).*Login failed for user `(?P<username>.*)` from IP `(?P<ip>.*)`'
+          template: '🚨 Failed login!\n📧 Username: ''{username}''\n🔎 IP Address: {ip}\n🕐 {timestamp}'
+          hide_pattern_in_title: true # Hide full regex pattern in notification title
+
   ebook2audiobook:
     attachment_lines: 300
     keywords:
