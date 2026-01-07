@@ -98,27 +98,6 @@ def format_message(messages, alt_text):
     message = "\n" + message
     return message
 
-
-def ensure_config_template():
-    """
-    Download config template if it or config.yaml does not exist.
-    """
-    config_dir = "/config"
-    config_template = os.path.join(config_dir, "config_template.yaml")
-    config_file = os.path.join(config_dir, "config.yaml")
-    config_url = "https://raw.githubusercontent.com/clemcer/loggifly/refs/heads/main/docs/configs/config_template.yaml"
-
-    if os.path.isdir(config_dir):
-        if not os.path.isfile(config_template) and not os.path.isfile(config_file):
-            try:
-                logging.info("loading config.yaml template...")
-                urllib.request.urlretrieve(config_url, config_template)
-            except Exception as e:
-                logging.warning(f"Could not download config template from {config_url}: {e}")
-    else:
-        logging.debug("/config does not exist, skipping config template download.")
-
-
 class ConfigHandler(FileSystemEventHandler):
     """
     Handles config.yaml changes by reloading configuration and updating all DockerLogMonitor instances.
@@ -381,7 +360,6 @@ def start_loggifly():
     Returns:
         threading.Event: Global shutdown event that can be waited on
     """
-    ensure_config_template()
     try:
         config, path = load_config()
     except (ValidationError, ConfigLoadError) as e:
