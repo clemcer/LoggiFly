@@ -26,7 +26,7 @@ from utils import convert_to_int, merge_modular_settings
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.decision import MonitorDecision
-from docker_monitoring.docker_helpers import (
+from docker_monitoring.helpers import (
     ContainerSnapshot, get_configured, parse_action_target,
     parse_event_type, swarm_mode_enabled, cleanup_stale_action_cooldowns,
     validate_container_for_action, container_action, ContainerActionResult,
@@ -62,15 +62,14 @@ class MonitoredContainerContext:
         self.config_key = config_key
         self.unit_config = unit_config
         self.config_via_labels = config_via_labels
+        self.host_identifier = host_identifier
+        self.hostname = hostname
 
         # Derived from snapshot
         self.monitor_type = MonitorType.SWARM if snapshot.is_swarm_service else MonitorType.CONTAINER
         self.unit_name = snapshot.unit_name
         self.container_name = snapshot.name
         self.container_id = snapshot.id
-
-        self.host_identifier = host_identifier
-        self.hostname = hostname
 
         # Runtime state
         self.generation = 0  # Used to track container restarts
@@ -202,19 +201,18 @@ class DockerLogMonitor:
         self.config = config
         self.client = client
 
-        self.swarm_mode: bool = swarm_mode_enabled()
-        self.swarm_node = None
+        formatter = None
+        self.host_identifier = None
+        self.swarm_mode = swarm_mode_enabled()
         if self.swarm_mode:
-            self.swarm_node: str | None = self._init_swarm_mode()
-
-        if self.swarm_node:
-            self.host_identifier = self.swarm_node
-            formatter = logging.Formatter(f'%(asctime)s - %(levelname)s - [Swarm: {self.swarm_node}] - %(message)s')
+            self.host_identifier = self._get_swarm_identifier()
+            if self.host_identifier:
+                formatter = logging.Formatter(f'%(asctime)s - %(levelname)s - [Swarm: {self.host_identifier}] - %(message)s')
         elif self.multi_host:
             self.host_identifier = self.hostname
             formatter = logging.Formatter(f'%(asctime)s - %(levelname)s - [Host: {self.hostname}] - %(message)s')
-        else:
-            self.host_identifier = None
+        
+        if formatter is None:
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         self._init_logging(formatter)
 
@@ -231,13 +229,13 @@ class DockerLogMonitor:
         self.last_action_lock = threading.Lock()
         self._registry = MonitoredContainerRegistry()
 
-        self.configured_stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_CONFIGURED", "24"), fallback_value=24*7)
-        self.stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED", "24"), fallback_value=24)
-        self.cleanup_interval_minutes = convert_to_int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"), fallback_value=60, min_value=1)
+        self.configured_stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_CONFIGURED"), fallback_value=24*7)
+        self.stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED"), fallback_value=24)
+        self.cleanup_interval_minutes = convert_to_int(os.getenv("CLEANUP_INTERVAL_MINUTES"), fallback_value=60, min_value=1)
         self._start_cleanup_thread()
 
 
-    def _init_swarm_mode(self) -> str | None:
+    def _get_swarm_identifier(self) -> str | None:
         # Find out if manager or worker and set host_identifier to differentiate between the instances
         identifier = None
         try:
@@ -339,7 +337,6 @@ class DockerLogMonitor:
         decision: MonitorDecision
         ) -> MonitoredContainerContext:
         """Prepare or reuse monitoring context for a container."""
-        # Type narrowing: these fields must be set when should_monitor is True
         assert decision.config_key is not None, "config_key must be set when monitoring"
         assert decision.unit_config is not None, "unit_config must be set when monitoring"
         assert decision.config_via_labels is not None, "config_via_labels must be set when monitoring"
@@ -378,7 +375,7 @@ class DockerLogMonitor:
             hostname=self.hostname,
         )
         self._registry.add(ctx)
-        # Create a log processor for this container
+        # Create a log processor for this container after creating ctx since processor needs ctx
         processor = LogProcessor(
             self.logger,
             self.config,
@@ -447,7 +444,6 @@ class DockerLogMonitor:
                         self._stop_and_close_stream(ctx, wait_for_thread=False)
                     ctx.currently_configured = False
                 elif decision.should_monitor:
-                    # Type narrowing: unit_config must be set when should_monitor is True
                     assert decision.unit_config is not None, "unit_config must be set when should_monitor is True"
                     assert ctx.processor is not None, "processor must be set when reloading config"
                     # Update context with new config
@@ -662,7 +658,10 @@ class DockerLogMonitor:
                     since_ts = last_seen_time or int(time.time())
                     self.event_stream = self.client.events(
                         decode=True, 
-                        filters={"event": list(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.values())}, 
+                        filters={
+                            "event": list(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.values()),
+                            "type": "container",
+                        }, 
                         since=since_ts)
                     self.logger.info("Docker Event Watcher started. Watching for new containers...")
                     for event in self.event_stream:
@@ -683,8 +682,7 @@ class DockerLogMonitor:
                                 container = self.client.containers.get(container_id)
                             except docker.errors.NotFound:
                                 self.logger.debug(f"Docker Event Handler: Container {container_id} not found.")
-                                continue
-                            if self._maybe_monitor_container(container):
+                            if container and self._maybe_monitor_container(container):
                                 if self.config.settings.disable_monitor_event_message is False:
                                     if ctx := self._registry.get_by_id(container.id):
                                         unit_name = ctx.unit_name
@@ -769,7 +767,7 @@ class DockerLogMonitor:
         Clean up all monitoring threads and connections on shutdown or error when client is unreachable.
         Closes log streams, joins threads, and closes the Docker client.
         """
-        self.logger.info(f"Starting cleanup for host {self.hostname}..." if self.hostname else "...")
+        self.logger.info("Starting cleanup")
         self.cleanup_event.set()
         self.shutdown_event.set()
         for context in self._registry.get_actively_monitored():
@@ -820,7 +818,7 @@ class DockerLogMonitor:
 
     def perform_container_action(
         self,
-        modular_settings: dict,
+        action_cooldown: int,
         action_to_perform: str,
         triggered_by_container_name: str,
     ) -> ContainerActionResult:
@@ -837,33 +835,38 @@ class DockerLogMonitor:
                 self.last_action_time_per_container[cooldown_key_container] = {}
             return self.last_action_time_per_container[cooldown_key_container]
 
-        cooldown = modular_settings.get("action_cooldown", 300)
-        action_name, container_target = parse_action_target(action_to_perform, triggered_by_container_name)
-        if not action_name or not container_target or action_name not in SUPPORTED_CONTAINER_ACTIONS:
+        action_type, container_target = parse_action_target(action_to_perform, triggered_by_container_name)
+
+        def make_result(success: bool, message: str, is_on_cooldown: bool = False) -> ContainerActionResult:
+            return ContainerActionResult(
+                success=success,
+                message=message,
+                action_type=action_type,
+                action_target=container_target,
+                is_on_cooldown=is_on_cooldown,
+            )
+        
+        if not action_type or not container_target or action_type not in SUPPORTED_CONTAINER_ACTIONS:
             # should not happen since config is validated
             self.logger.error(f"Invalid action syntax or action not supported: {action_to_perform}")
-            return ContainerActionResult.failed(
-                f"Container action failed: Invalid action syntax or action not supported: {action_to_perform}",
-                action_to_perform
-            )
+            return make_result(success=False, message=f"Container action failed: Invalid action syntax or action not supported: {action_to_perform}")
 
         cooldown_key_container = container_target
-        cooldown_key_action = action_name
+        cooldown_key_action = action_type
 
         with self.last_action_lock:
             cleanup_stale_action_cooldowns(self.last_action_time_per_container)
             cooldown_dict = get_cooldown_dict(cooldown_key_container)
             last_time = cooldown_dict.get(cooldown_key_action, 0)
-            if last_time < time.time() - int(cooldown):
+            if last_time < time.time() - int(action_cooldown):
                 should_run_action = True
                 # Set cooldown before action to prevent concurrent execution by other threads
                 cooldown_dict[cooldown_key_action] = time.time()
             else:
-                # TODO: maybe return message that action is on cooldown? would be appended to notification title
                 should_run_action = False
                 last_action_time = time.strftime("%H:%M:%S", time.localtime(cooldown_dict.get(cooldown_key_action, 0)))
-                self.logger.info(f"Not performing action: '{action_to_perform}'. Action is on cooldown. Action was last performed at {last_action_time}. Cooldown is {cooldown} seconds.")
-                return ContainerActionResult.on_cooldown(f"Action '{action_name}' for container '{container_target}' is on cooldown.", action_to_perform)
+                self.logger.info(f"Not performing action: '{action_to_perform}'. Action is on cooldown. Action was last performed at {last_action_time}. Cooldown is {action_cooldown} seconds.")
+                return make_result(success=False, message=f"Action '{action_type}' for container '{container_target}' is on cooldown.", is_on_cooldown=True)
 
         # run action outside of lock
         if should_run_action:
@@ -873,39 +876,33 @@ class DockerLogMonitor:
                     container: Container = self.client.containers.get(container_target)
                 except docker.errors.NotFound:
                     self.logger.error(f"Container {container_target} not found. Could not perform action: {action_to_perform}")
-                    result = ContainerActionResult.failed(f"Failed to perform action: Container '{container_target}' not found.", action_to_perform)
+                    result = make_result(success=False, message=f"Failed to perform action: Container '{container_target}' not found.")
                     return result
                 except Exception as e:
                     self.logger.error(f"Unexpected error for action '{action_to_perform}' on container '{container_target}': {e}")
-                    result = ContainerActionResult.failed(f"Unexpected error for {action_to_perform}. See logs for details.", action_to_perform)
+                    result = make_result(success=False, message=f"Unexpected error for {action_to_perform}. See logs for details.")
                     return result
                 try:
                     validate_container_for_action(container, self.client)
                 except Exception as e:
                     self.logger.error(f"Container {container_target} is not suitable for action: {action_to_perform}. Error: {e}")
-                    result = ContainerActionResult.failed(
-                        f"Failed to {action_name} {container_target}: {e}",
-                        action_to_perform
-                    )
+                    result = make_result(success=False, message=f"Failed to {action_type} {container_target}: {e}")
                     return result
                 try:
-                    action_message = container_action(container, action_name, self.logger)
-                    result = ContainerActionResult.succeeded(action_message, action_to_perform)
+                    action_message = container_action(container, action_type, self.logger)
+                    result = make_result(success=True, message=action_message)
                     return result
                 except ContainerValidationError as e:
-                    # Expected validation failures (wrong state) - info level is sufficient
-                    self.logger.info(f"Container validation failed for {action_to_perform}: {e}")
-                    result = ContainerActionResult.failed(str(e), action_to_perform)
+                    self.logger.warning(f"Container validation failed for {action_to_perform}: {e}")
+                    result = make_result(success=False, message=str(e))
                     return result
                 except ContainerActionError as e:
-                    # Docker operation errors - already logged in container_action
-                    result = ContainerActionResult.failed(str(e), action_to_perform)
+                    result = make_result(success=False, message=str(e))
                     return result
                 except Exception as e:
-                    # Truly unexpected errors (shouldn't happen)
                     self.logger.error(f"Unexpected error performing {action_to_perform}: {e}")
                     self.logger.debug(traceback.format_exc())
-                    result = ContainerActionResult.failed(f"Unexpected error: {str(e)[:60]}", action_to_perform)
+                    result = make_result(success=False, message=f"Unexpected error: {str(e)[:60]}")
                     return result
             finally:
                 if result:
@@ -914,4 +911,4 @@ class DockerLogMonitor:
                         # TODO: should cooldown even be set on errors? currently it is
                         cooldown_dict[cooldown_key_action] = time.time()
         self.logger.critical(f"CRITICAL BUG: perform_container_action fell through all code paths for action: {action_to_perform}")
-        return ContainerActionResult.failed("Internal error: invalid code path", action_to_perform)
+        return make_result(success=False, message="Internal error: invalid code path")

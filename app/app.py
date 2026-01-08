@@ -49,8 +49,9 @@ def get_title_prefix(docker_hosts: List[DockerClientInfo]) -> str:
     since multiple LoggiFly instances (swarm containers) might be running on different nodes 
     sending notifications to the same endpoint.
     """
-    if len(docker_hosts) == 1 and docker_hosts[0].monitor and docker_hosts[0].monitor.swarm_mode:
-        return f"[{docker_hosts[0].monitor.host_identifier}] - "
+    if len(docker_hosts) == 1 and (m := docker_hosts[0].monitor ):
+        if m.swarm_mode and m.host_identifier:
+            return f"[{docker_hosts[0].monitor.host_identifier}] - "
     return ""
 
 def create_handle_signal(docker_hosts: List[DockerClientInfo], config, config_observer):
@@ -143,9 +144,9 @@ class ConfigHandler(FileSystemEventHandler):
             return
 
         # Only update if loading and validation succeeded
+        self.config = new_config
         logging.getLogger().setLevel(getattr(logging, self.config.settings.log_level.upper(), logging.INFO))
         logging.info(f"Log-Level set to {self.config.settings.log_level}")
-        self.config = new_config
         messages = []
         for monitor in self.monitor_instances:
             messages.append(monitor.reload_config(self.config))
@@ -199,7 +200,9 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
                 tls_config = host_info.tls_config
                 label = host_info.label
                 monitor = host_info.monitor
-                assert monitor is not None
+                if not monitor:
+                    logging.warning(f"Monitor not found for {host_url} ({label})")
+                    continue
                 if monitor.shutdown_event.is_set():
                     while monitor.cleanup_event.is_set():
                         time.sleep(1)

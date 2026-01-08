@@ -78,20 +78,9 @@ class ContainerActionResult:
     """Result of a container action attempt"""
     success: bool
     message: str
-    action_name: str
+    action_type: str # e.g. "start"
+    action_target: str # e.g. "container_name"
     is_on_cooldown: bool = False
-
-    @classmethod
-    def succeeded(cls, message: str, action_name: str) -> 'ContainerActionResult':
-        return cls(success=True, message=message, action_name=action_name)
-
-    @classmethod
-    def failed(cls, error: str, action_name: str) -> 'ContainerActionResult':
-        return cls(success=False, message=error, action_name=action_name)
-
-    @classmethod
-    def on_cooldown(cls, message: str, action_name: str) -> 'ContainerActionResult':
-        return cls(success=False, message=message, is_on_cooldown=True, action_name=action_name)
 
 class ContainerActionError(Exception):
     """Base exception for container action failures"""

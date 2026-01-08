@@ -7,7 +7,7 @@ from config.config_model import GlobalConfig
 from config.config_model import ContainerConfig as ModelContainerConfig, SwarmServiceConfig as ModelSwarmServiceConfig
 from config.load_config import validate_unit_config
 from constants import MonitorType
-from docker_monitoring.docker_helpers import ContainerSnapshot, parse_label_config
+from docker_monitoring.helpers import ContainerSnapshot, parse_label_config
 
 if TYPE_CHECKING:
     from docker_monitoring.monitor import MonitoredContainerContext
@@ -21,7 +21,6 @@ class MonitorDecision:
     config_key: str | None = None
     unit_config: ModelContainerConfig | ModelSwarmServiceConfig | None = None
     config_via_labels: bool | None = None
-
 
     class Result(Enum):
         """Possible monitoring decision outcomes."""
@@ -121,8 +120,7 @@ class MonitorDecision:
     def _get_container_settings_for_host(global_config: GlobalConfig, hostname: str):
         """Extract host-specific container settings."""
         host_config = global_config.hosts.get(hostname) if isinstance(global_config.hosts, dict) and hostname else None
-        containers = dict(global_config.containers or {})  # Create copy!
-
+        containers = dict(global_config.containers or {})
         if host_config:
             monitor_all_containers = host_config.monitor_all_containers if host_config.monitor_all_containers is not None else global_config.settings.monitor_all_containers
             excluded_containers = host_config.excluded_containers or global_config.settings.excluded_containers or []
@@ -134,7 +132,7 @@ class MonitorDecision:
         return containers, monitor_all_containers, excluded_containers
 
     @staticmethod
-    def is_excluded_for_host(unit_config: ModelContainerConfig | ModelSwarmServiceConfig, hostname: str) -> bool:
+    def _is_excluded_for_host(unit_config: ModelContainerConfig | ModelSwarmServiceConfig, hostname: str) -> bool:
         if not hostname or not unit_config.hosts:
             return False
         hostnames = [hn.strip() for hn in unit_config.hosts.split(",")]
@@ -158,29 +156,32 @@ class MonitorDecision:
         label_source = None
 
         # Try service labels first
+        labels = {}
         if snapshot.service_labels:
+            labels = snapshot.service_labels
             decision = cls._check_label(snapshot.service_labels)
             label_source = "swarm service labels"
 
+
         # Fallback to container labels if unknown
         if decision == cls.LabelDecision.UNKNOWN:
-            decision = cls._check_label(snapshot.labels)
+            labels = snapshot.labels
+            decision = cls._check_label(labels)
             label_source = "container labels"
 
         # Labels explicitly say monitor
         if decision == cls.LabelDecision.MONITOR:
             unit_config = validate_unit_config(
                 MonitorType.SWARM,
-                parse_label_config(snapshot.service_labels or snapshot.labels)
+                parse_label_config(labels)
             )
             if unit_config is None:
-                labels_info = snapshot.service_labels or snapshot.labels
                 logger.error(
                     f"Could not validate swarm service config for '{service_name}' from {label_source}.\n"
-                    f"Labels: {labels_info}"
+                    f"Labels: {labels}"
                 )
             else:
-                if cls.is_excluded_for_host(unit_config, hostname):
+                if cls._is_excluded_for_host(unit_config, hostname):
                     return cls(
                         result=cls.Result.SKIP,
                         reason=f"swarm service {service_name} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this swarm service."
@@ -207,7 +208,7 @@ class MonitorDecision:
         if swarm_services:
             if service_name in swarm_services:
                 unit_config = swarm_services[service_name]
-                if cls.is_excluded_for_host(unit_config, hostname):
+                if cls._is_excluded_for_host(unit_config, hostname):
                     return cls(
                         result=cls.Result.SKIP,
                         reason=f"swarm service {service_name} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this swarm service."
@@ -221,7 +222,7 @@ class MonitorDecision:
                 )
             if stack_name and stack_name in swarm_services:
                 unit_config = swarm_services[stack_name]
-                if cls.is_excluded_for_host(unit_config, hostname):
+                if cls._is_excluded_for_host(unit_config, hostname):
                     return cls(
                         result=cls.Result.SKIP,
                         reason=f"swarm service {stack_name} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this swarm service."
@@ -280,7 +281,7 @@ class MonitorDecision:
                     f"Labels: {snapshot.labels}"
                 )
             else:
-                if cls.is_excluded_for_host(unit_config, hostname):
+                if cls._is_excluded_for_host(unit_config, hostname):
                     return cls(
                         result=cls.Result.SKIP,
                         reason=f"container {cname} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this container."
@@ -303,7 +304,7 @@ class MonitorDecision:
         # Check explicit config
         if cname in containers:
             unit_config = containers[cname]
-            if cls.is_excluded_for_host(unit_config, hostname):
+            if cls._is_excluded_for_host(unit_config, hostname):
                 return cls(
                     result=cls.Result.SKIP,
                     reason=f"container {cname} is configured for host(s) '{unit_config.hosts}' but this instance is running on host '{hostname}'. Skipping this container."
