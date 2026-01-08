@@ -7,7 +7,7 @@ from services import trigger_olivetin_action
 
 if TYPE_CHECKING:
     from docker_monitoring.monitor import DockerLogMonitor, MonitoredContainerContext
-    from docker_monitoring.docker_helpers import ContainerActionResult
+    from docker_monitoring.helpers import ContainerActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,17 @@ def process_trigger(
 
     # Perform container action if configured
     if action_to_perform is not None:
-        action_result = monitor_instance.perform_container_action(modular_settings, action_to_perform, unit_context.container_name)
+        action_result = monitor_instance.perform_container_action(
+            modular_settings.get("action_cooldown", 300),
+            action_to_perform,
+            unit_context.container_name,
+        )
+        notification_context.action_string = action_to_perform
+        notification_context.action_type = action_result.action_type
+        notification_context.action_target = action_result.action_target
         # append action result no matter which outcome
         notification_context.action_result = action_result.message
+        notification_context.action_succeeded = action_result.success
     logger.debug(f"\n\nNotification context:\n{notification_context.to_dict()}\n\n")
 
     # Create log file attachment if requested

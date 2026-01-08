@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, Optional, List, Any
 
 from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, MonitorType
-from docker_monitoring.docker_helpers import ContainerSnapshot
+from docker_monitoring.helpers import ContainerSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -110,21 +110,31 @@ class NotificationContext:
     notification_type: NotificationType
     unit_name: str
     monitor_type: MonitorType
-
     hostname: Optional[str] = None
     host_identifier: Optional[str] = None # hostname for multi-host setups, "manager@node1" or "worker@node2" for swarm, else None
+  
+    # log match fields
     log_line: Optional[str] = None
     regex: Optional[str] = None
     keywords_found: List[str] = field(default_factory=list)
+  
+    # container event fields
     event: Optional[str] = None
     exit_code: Optional[int] = None
     signal: Optional[str] = None
+
+    # action fields
+    action_type: Optional[str] = None
+    action_string: Optional[str] = None
+    action_target: Optional[str] = None
     action_result: Optional[str] = None
+    action_succeeded: Optional[bool] = None
+
     extra_fields: Dict[str, Any] = field(default_factory=dict)
     time: Optional[int | float] = None
-
+    
+    # from container snapshot
     container_snapshot: Optional[ContainerSnapshot] = None
-    # from snapshot
     container_id: Optional[str] = None
     container_name: Optional[str] = None
     swarm_service_name: Optional[str] = None
@@ -132,11 +142,13 @@ class NotificationContext:
     image: Optional[str] = None
 
     def __post_init__(self):
-        self.image = self.image or (self.container_snapshot.image if self.container_snapshot else None)
-        self.container_id = self.container_id or (self.container_snapshot.id if self.container_snapshot else None)
-        self.swarm_service_name = self.swarm_service_name or (self.container_snapshot.service_name if self.container_snapshot else None)
-        self.stack_name = self.stack_name or (self.container_snapshot.stack_name if self.container_snapshot else None)
-        self.container_name = self.container_name or (self.container_snapshot.name if self.container_snapshot else None)
+        # from container snapshot
+        if self.container_snapshot:
+            self.image = self.container_snapshot.image
+            self.container_id = self.container_snapshot.id
+            self.swarm_service_name = self.container_snapshot.service_name
+            self.stack_name = self.container_snapshot.stack_name
+            self.container_name = self.container_snapshot.name
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -157,6 +169,8 @@ class NotificationContext:
 
         # These are the default template fields that are always available
         defaults = {
+            "notification_type": self.notification_type.value,
+
             "container_id": self.container_id,
             "container_name": self.container_name,
             "service_name": self.swarm_service_name,
@@ -164,21 +178,30 @@ class NotificationContext:
             "unit_name": self.unit_name,
             "container": self.unit_name, # legacy template field   
             "docker_image": self.image,
-            "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
-            "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
-            "event": self.event,
+            
             "hostname": self.hostname,
             "host_identifier": self.host_identifier,
             "monitor_type": self.monitor_type.value,
+
             "original_log_line": self.log_line,
             "log_entry": self.log_line,
+            "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
+            "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
+
             "timestamp": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "date": dt.strftime("%Y-%m-%d"),
             "time": dt.strftime("%H:%M:%S"),
             "datetime": dt.strftime("%Y-%m-%d %H:%M:%S"),
+
+            "event": self.event,
             "exit_code": self.exit_code,
             "signal": self.signal,
+
+            "action_type": self.action_type,
+            "action_string": self.action_string,
+            "action_target": self.action_target,
             "action_result": self.action_result,
+            "action_succeeded": self.action_succeeded,
         }
 
         extracted = get_template_fields(self.log_line, regex=self.regex) if self.log_line else {}

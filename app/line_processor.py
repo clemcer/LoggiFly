@@ -1,11 +1,6 @@
-import docker
-import os
 import re
 import time
-import json
-from typing import Optional
-import logging
-import traceback
+from typing import TYPE_CHECKING
 import threading
 from threading import Thread, Lock
 from config.config_model import GlobalConfig, KeywordItem, RegexItem, KeywordGroup, ContainerConfig, SwarmServiceConfig
@@ -17,7 +12,8 @@ from constants import (
 from notification_formatter import NotificationContext
 from utils import merge_modular_settings, merge_with_precedence
 from trigger import process_trigger
-
+if TYPE_CHECKING:
+    from docker_monitoring.monitor import MonitoredContainerContext, DockerLogMonitor
 
 class LogProcessor:
     """
@@ -34,11 +30,11 @@ class LogProcessor:
     COMPILED_FLEX_PATTERNS = COMPILED_FLEX_PATTERNS
 
     def __init__(self,
-                 logger, 
-                 config: GlobalConfig, 
+                 logger,
+                 config: GlobalConfig,
                  unit_config: ContainerConfig | SwarmServiceConfig,
-                 monitor_instance,
-                 unit_context,
+                 monitor_instance: "DockerLogMonitor",
+                 unit_context: "MonitoredContainerContext",
                  ):
         """
         Initialize the log processor for a specific container or service.
@@ -47,7 +43,7 @@ class LogProcessor:
             logger: Logger instance for this processor
             config: Global configuration object
             unit_config: Container/service specific configuration
-            monitor_instance: DockerMonitor instance from which the processor is called
+            monitor_instance: DockerLogMonitor instance from which the processor is called
             unit_context: MonitoredContainerContext instance
         """
         self.logger = logger
