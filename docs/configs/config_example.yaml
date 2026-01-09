@@ -74,6 +74,20 @@ containers:
           template: '🚨 Failed login!\n📧 Username: ''{username}''\n🔎 IP Address: {ip}\n🕐 {timestamp}'
           hide_pattern_in_title: true # Hide full regex pattern in notification title
 
+  grafana:
+    ntfy_tags: closed_lock_with_key
+    ntfy_priority: 5
+    ntfy_topic: security
+    notification_title: 'Failed Grafana login'
+    notification_cooldown: 0
+    keywords:
+        - regex: '.*logger=authn\.service.*\[identity.not-found\]\s+(?P<msg>.*)'
+          template: '🚨 {msg}'
+          hide_pattern_in_title: true # Hide full regex pattern in notification title
+        - regex: '.*logger=authn\.service.*\[password-auth.failed\]\s+(?P<msg>.*)'
+          template: '🚨 {msg}'
+          hide_pattern_in_title: true # Hide full regex pattern in notification title
+
   ebook2audiobook:
     attachment_lines: 300
     keywords:
