@@ -253,16 +253,16 @@ def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list
         (containers, selected_containers),
         (swarm_services, selected_swarm_services),
     ]
-    for (objects_in_config, selected) in configs_to_check:
-        if not objects_in_config:
+    for (config_of_units, selected) in configs_to_check:
+        if not config_of_units:
             continue
-        for object_name in objects_in_config:
-            config_object = objects_in_config[object_name]
+        for unit_name in config_of_units:
+            config_object = config_of_units[unit_name]
             if hostname and config_object.hosts is not None:
                 hostnames = config_object.hosts.split(",")
                 if all(hn.strip() != hostname for hn in hostnames):
                     continue
-            selected.append(object_name)
+            selected.append(unit_name)
     return selected_containers, selected_swarm_services
 
 

@@ -12,9 +12,8 @@ from dataclasses import dataclass
 import socket
 from docker.tls import TLSConfig
 from urllib.parse import urlparse
-import urllib.request
 from pydantic import ValidationError
-from typing import Any, List
+from typing import List
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -45,9 +44,7 @@ class DockerClientInfo:
 
 def get_title_prefix(docker_hosts: List[DockerClientInfo]) -> str:
     """ 
-    In swarm mode user might want to differentiate between manager and worker nodes 
-    since multiple LoggiFly instances (swarm containers) might be running on different nodes 
-    sending notifications to the same endpoint.
+    In swarm mode user might want to differentiate between LoggiFly instances on different nodes 
     """
     if len(docker_hosts) == 1 and (m := docker_hosts[0].monitor ):
         if m.swarm_mode and m.host_identifier:
@@ -193,8 +190,8 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
     """
     def check_and_reconnect():
         """Main monitoring loop for connection status."""
-        while True:
-            time.sleep(60)
+        while not global_shutdown_event.is_set():
+            global_shutdown_event.wait(timeout=60)
             for host_info in docker_host_infos:
                 host_url = host_info.host_url
                 tls_config = host_info.tls_config
@@ -261,7 +258,6 @@ def create_docker_clients() -> list[DockerClientInfo]:
                 return TLSConfig(client_cert=(cert, key), ca_cert=ca, verify=True)
         return None
 
-    # Parse DOCKER_HOST environment variable
     docker_host = os.environ.get("DOCKER_HOST", "")
     logging.debug(f"Environment variable DOCKER_HOST: {os.environ.get('DOCKER_HOST', ' - Not configured - ')}")
     tmp_hosts = [h.strip() for h in docker_host.split(",") if h.strip()]

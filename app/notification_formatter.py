@@ -3,6 +3,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from string import Formatter
 from typing import Dict, Optional, List, Any
 
 from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, MonitorType
@@ -24,6 +25,68 @@ class SafeDict(dict):
     def __missing__(self, key):
         self.missing_keys.add(key)
         return "{" + key + "}"
+
+def _format_with_safe_dict(template: str, data: Dict[str, Any]) -> tuple[str, set]:
+    try:
+        safe = SafeDict(data)
+        rendered = template.format_map(safe)
+        return rendered, safe.missing_keys
+    except Exception as e:
+        logger.warning(f"Template formatting failed: {e}. Attempting partial formatting.")
+    try:
+        rendered, missing = _partial_format(template, data)
+        logger.info(f"Partial formatting succeeded: {rendered}")
+        if missing:
+            logger.warning(f"Missing keys in partial formatting: {missing}")
+        return rendered, missing
+    except Exception as e:
+        logger.error(f"Partial formatting also failed: {e}")
+        return template, set()
+
+def _partial_format(template: str, data: Dict[str, Any]) -> tuple[str, set]:
+    """
+    Extract fields using Python's Formatter, test each individually, replace valid ones.
+    """
+    formatter = Formatter()
+    fields_to_test = []
+    seen_fields = set()
+
+    for literal_text, field_name, format_spec, conversion in formatter.parse(template):
+        # field_name is None for literal text portions (including escaped braces)
+        if field_name is None:
+            continue
+        full_field = field_name
+        if conversion:
+            full_field = f"{full_field}!{conversion}"
+        if format_spec:
+            full_field = f"{full_field}:{format_spec}"
+
+        if full_field not in seen_fields:
+            seen_fields.add(full_field)
+            fields_to_test.append(full_field)
+
+    # Test each unique field individually
+    valid_fields = {}
+    invalid_fields = []
+    all_missing_keys = set()
+
+    for field in fields_to_test:
+        test_template = f"{{{field}}}"
+        try:
+            safe = SafeDict(data)
+            result = test_template.format_map(safe)
+            valid_fields[field] = result
+            all_missing_keys.update(safe.missing_keys)
+        except (ValueError, KeyError) as e:
+            invalid_fields.append((field, str(e)))
+            logger.warning(f"Invalid template field '{{{field}}}': {e}")
+
+    # Replace valid fields in the original template
+    result = template
+    for field, value in valid_fields.items():
+        result = result.replace(f"{{{field}}}", value)
+
+    return result, all_missing_keys
 
 
 def _extract_fields_from_json(log_line: str) -> Dict[str, Any]:
@@ -66,16 +129,6 @@ def get_template_fields(
         for key, value in _extract_fields_from_regex(log_line, regex).items():
             fields.setdefault(key, value)
     return fields
-
-
-def _format_with_safe_dict(template: str, data: Dict[str, Any]) -> tuple[str, set]:
-    try:
-        safe = SafeDict(data)
-        rendered = template.format_map(safe)
-        return rendered, safe.missing_keys
-    except Exception as e:
-        logging.error(f"Error formatting template: {e}")
-        return template, set()
 
 
 def default_title_for_log_match(
