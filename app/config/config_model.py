@@ -182,7 +182,6 @@ class OliveTinAction(BaseConfigModel):
 
 class KeywordItemBase(ModularSettings):
     """Base class for keyword items with common fields for actions and templates."""
-    # json_template: Optional[str] = None # legacy
     action: Optional[str] = None
     olivetin_actions: Optional[List[OliveTinAction]] = None
 
@@ -199,13 +198,14 @@ class KeywordItemBase(ModularSettings):
             return validate_and_filter_olivetin_actions(data)
         return data
 
+
 class RegexItem(KeywordItemBase):
     """
     Model for a regex-based keyword with optional settings.
     Template allows for notification formatting using named capturing groups.
     """
     regex: str
-    # template: Optional[str] = None # legacy
+
 
 class KeywordItem(KeywordItemBase):
     """
@@ -325,6 +325,7 @@ class ContainerEventBase(BaseConfigModel):
             data["container_events"] = converted
         return data
 
+
 class ContainerConfig(KeywordBase, ContainerEventBase, ModularSettings):    
     """
     Model for per-container configuration, including keywords and setting overrides.
@@ -336,6 +337,7 @@ class ContainerConfig(KeywordBase, ContainerEventBase, ModularSettings):
     def validate_priority(cls, v):
         return validate_priority(v)
 
+
 class SwarmServiceConfig(KeywordBase, ContainerEventBase, ModularSettings):
     """
     Model for per-swarm service configuration, inheriting from ContainerConfig.
@@ -343,6 +345,8 @@ class SwarmServiceConfig(KeywordBase, ContainerEventBase, ModularSettings):
     """
     _DISALLOW_SELF_CONTAINER_ACTION: ClassVar[bool] = True
     hosts: Optional[str] = None
+
+    
 class GlobalKeywords(BaseConfigModel, KeywordBase):
     """Global keyword configuration that applies to all monitored containers."""
     pass
@@ -382,7 +386,7 @@ class AppriseConfig(BaseConfigModel):
 
 class WebhookConfig(BaseConfigModel):
     url: str
-    headers: Optional[dict]
+    headers: Optional[dict] = None
 
 
 class NotificationsConfig(BaseConfigModel):
@@ -397,7 +401,23 @@ class NotificationsConfig(BaseConfigModel):
         if self.ntfy is None and self.apprise is None and self.webhook is None:
             logging.warning("You haven't configured any notification services. Notifications will not be sent.")
         return self
-
+    
+    @model_validator(mode="before")
+    def validate_required_fields(cls, data: dict):
+        if data and isinstance(data, dict):
+            if data.get("ntfy"):
+                if not data["ntfy"].get("url") or not data["ntfy"].get("topic"):
+                    logging.warning("Ntfy URL and topic are required. Ignoring ntfy config.")
+                    data["ntfy"] = None
+            if data.get("apprise"):
+                if not data["apprise"].get("url"):
+                    logging.warning("Apprise URL is required. Ignoring apprise config.")
+                    data["apprise"] = None
+            if data.get("webhook"):
+                if not data["webhook"].get("url"):
+                    logging.warning("Webhook URL is required. Ignoring webhook config.")
+                    data["webhook"] = None
+        return data
 
 class HostConfig(BaseConfigModel):
     monitor_all_containers: Optional[bool] = None

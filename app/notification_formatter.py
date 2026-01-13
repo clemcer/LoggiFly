@@ -97,8 +97,8 @@ def _extract_fields_from_json(log_line: str) -> Dict[str, Any]:
         return json.loads(log_line)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {}
-    except Exception as exc:
-        logging.error(f"Unexpected error parsing log line as JSON: {exc}")
+    except Exception as e:
+        logger.error(f"Unexpected error parsing log line as JSON: {e}")
         return {}
 
 
@@ -109,8 +109,11 @@ def _extract_fields_from_regex(log_line: str, regex: Optional[str]) -> Dict[str,
     try:
         match = re.search(regex, log_line, re.IGNORECASE)
         return match.groupdict() if match else {}
-    except re.error as exc:
-        logging.warning(f"Invalid regex '{regex}': {exc}")
+    except re.error as e:
+        logger.warning(f"Invalid regex '{regex}': {e}")
+        return {}
+    except Exception as e:
+        logger.error(f"Unexpected error extracting fields from regex: {e}")
         return {}
 
 
@@ -149,7 +152,7 @@ def default_title_for_log_match(
     return title
 
 
-def default_title_for_event(unit_name: str, event: Optional[str]) -> str:
+def fallback_title_for_event(unit_name: str, event: Optional[str]) -> str:
     return f"Event '{event}' for container {unit_name}" if event else f"Event for container {unit_name}"
 
 
@@ -197,11 +200,11 @@ class NotificationContext:
     def __post_init__(self):
         # from container snapshot
         if self.container_snapshot:
-            self.image = self.container_snapshot.image
-            self.container_id = self.container_snapshot.id
-            self.swarm_service_name = self.container_snapshot.service_name
-            self.stack_name = self.container_snapshot.stack_name
-            self.container_name = self.container_snapshot.name
+            self.image = self.container_snapshot.image if not self.image else self.image
+            self.container_id = self.container_snapshot.id if not self.container_id else self.container_id
+            self.swarm_service_name = self.container_snapshot.service_name if not self.swarm_service_name else self.swarm_service_name
+            self.stack_name = self.container_snapshot.stack_name if not self.stack_name else self.stack_name
+            self.container_name = self.container_snapshot.name if not self.container_name else self.container_name
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -224,7 +227,8 @@ class NotificationContext:
         defaults = {
             "notification_type": self.notification_type.value,
 
-            "container_id": self.container_id,
+            "container_id": self.container_id[:12] if self.container_id else None,
+            "full_container_id": self.container_id,
             "container_name": self.container_name,
             "service_name": self.swarm_service_name,
             "stack_name": self.stack_name,
@@ -290,9 +294,8 @@ def render_title(
                 logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')}")
                 title, missing = _format_with_safe_dict(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
                 if missing:
+                    title = fallback_title_for_event(ctx.unit_name, ctx.event)
                     logging.warning(f"Missing keys in event default title template: {missing}.")
-            if not title: # fallback
-                title = default_title_for_event(ctx.unit_name, ctx.event)
 
         # Prepend host identifier to title (only exists for multi-host or swarm setups)
         if ctx.host_identifier:

@@ -24,14 +24,7 @@ def merge_with_precedence(
 ) -> dict:
     """
     Generic precedence merge helper used for modular settings and notifications.
-
-    Rules:
-    - `None` in precedence means "not set" → fallback is kept.
-    - Scalars: first non-None wins.
-    - Lists: union with precedence items first (order preserved, duplicates removed) when `list_union` is True;
-      otherwise precedence replaces.
-    - Dicts: shallow merge, precedence overrides; nested dicts merged recursively.
-    - Keys: if provided, only these keys are considered (maintains schema alignment).
+    If keys are provided, only these keys are considered (maintains schema alignment).
     """
     no_list_union = no_list_union or []
     precedence = precedence or {}

@@ -194,7 +194,7 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: dict | None 
 
     headers = {
         "Title": title.encode("latin-1", errors="ignore").decode("latin-1").strip(),
-        "Icon": "https://raw.githubusercontent.com/clemcer/loggifly/blob/main/docs/public/icon.png",
+        "Icon": "https://raw.githubusercontent.com/clemcer/LoggiFly/refs/heads/main/docs/public/icon.png",
         "Priority": f"{ntfy_config.get('priority', 3)}"
     }
     if ntfy_config.get("token"):
@@ -282,10 +282,6 @@ def send_notification(config: GlobalConfig,
     Handles message formatting, file attachments, and host labeling.
     """
     message = message.replace(r"\n", "\n").strip() if message else ""
-    # If multiple hosts are set, prepend hostname to title
-    # title = f"[{hostname}] - {title}" if hostname else title
-    if not config.notifications:
-        return
     nc = config.notifications.model_dump(exclude_none=True)
     ntfy_config = get_notification_config(modular_settings or {}, nc.get("ntfy", {}), NTFY_PREFIX, NTFY_KEYS)
     apprise_url = get_notification_config(modular_settings or {}, nc.get("apprise", {}), APPRISE_PREFIX, APPRISE_KEYS).get("url")

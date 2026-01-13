@@ -19,6 +19,9 @@ class ConfigLoadError(Exception):
     """Raised when config file exists but cannot be loaded or parsed"""
     pass
 
+TOP_LEVEL_KEYS = [
+    "notifications", "settings", "global_keywords", "containers", "swarm_services"
+    ]
 
 """
 This module handles configuration loading and validation using Pydantic models. 
@@ -27,74 +30,46 @@ environment variables to override YAML values, and YAML to override defaults.
 The merged configuration is validated with Pydantic. Legacy config formats are migrated for compatibility.
 """
 
-
 def merge_yaml_and_env(yaml, env_update):
     """
-    Recursively merge environment variable config into YAML config, overriding YAML values where present in env_update.
-    Returns:
-        dict: Merged configuration with environment variables taking precedence
+    Merge environment variables and YAML configuration.
     """
+    def merge_dict_with_precedence(y, e):
+        for k, v in e.items():
+            if v is not None:
+                y[k] = v
+        return y
+
     for key, value in env_update.items():
-        if isinstance(value, dict) and key in yaml and key != {}:
-            merge_yaml_and_env(yaml[key],value)
-        else:
-            if value is not None :
-                yaml[key] = value
+        if not isinstance(value, dict):
+            continue
+        if not yaml.get(key):
+            yaml[key] = {}
+        if isinstance(value, dict) and key in ("containers", "swarm_services"):
+            yaml[key] = merge_dict_with_precedence(yaml[key], value)
+        elif key == "global_keywords":
+            yaml[key] = merge_dict_with_precedence(yaml[key], value)
+        elif key == "notifications":
+            for notification_type, notification_value in value.items(): # ntfy, apprise, webhook
+                if notification_value:
+                    if not yaml[key].get(notification_type): 
+                        yaml[key][notification_type] = {}
+                    yaml[key][notification_type] = merge_dict_with_precedence(yaml[key][notification_type], notification_value)
+        elif key == "settings":
+            yaml[key] = merge_dict_with_precedence(yaml[key], value)
     return yaml
 
 
-def load_config(official_path="/config/config.yaml"):
-    """
-    Load, merge, and validate the application configuration from YAML and environment variables.
-    Returns: tuple: (validated_config_object, config_file_path_used)
-    """
-    config_path = None
-    required_keys = ["notifications", "settings", "global_keywords"]
-    yaml_config = None
-    legacy_path = "/app/config.yaml"
-    paths = [official_path, legacy_path]
-    error_messages = []
-    # Try to load YAML config from available paths
-    for path in paths:
-        logging.debug(f"Trying path: {path}")
-        if os.path.isfile(path):
-            config_path = path
-            try:
-                with open(path, "r") as file:
-                    yaml_config = yaml.safe_load(file)
-                    break
-            except yaml.YAMLError as e:
-                # YAML exists but is broken - this is FATAL
-                error_messages.append(f"Error parsing YAML file at {path}: {e}")
-                logging.error(f"Error parsing YAML file at {path}: {e}")
-                # raise ConfigLoadError(f"Invalid YAML in {path}: {e}") from e
-            except Exception as e:
-                logging.error(f"Unexpected error loading {path}: {e}")
-                error_messages.append(f"Failed to load {path}: {e}")
-                # raise ConfigLoadError(f"Failed to load {path}: {e}") from e
-        else:
-            logging.debug(f"The path {path} does not exist.")
+def convert_string_to_list(string: str | None) -> list:
+    return [s.strip() for s in string.split(",") if s.strip()] if string else []
 
-    # If no file found at any path, continue with empty config (startup-friendly)
-    if yaml_config is None:
-        if error_messages:
-            # Don't load config if there are errors with the config file
-            raise ConfigLoadError("\n".join(error_messages))
-        logging.warning(f"No config.yaml found in any location")
-        yaml_config = {}
-    else:
-        logging.info(f"The config.yaml file was found in {config_path}.")
 
-    # Ensure required top-level keys exist
-    for key in required_keys:
-        if key not in yaml_config or yaml_config[key] is None:
-            yaml_config[key] = {}
+def load_env_config(yaml_exists: bool):
 
-    env_config = { "notifications": {}, "settings": {}, "global_keywords": {}}
-    settings_values = {
+    ENV_SETTINGS = {
         "log_level": os.getenv("LOG_LEVEL"),
         "multi_line_entries": os.getenv("MULTI_LINE_ENTRIES"),
-        "reload_config": False if config_path is None else os.getenv("RELOAD_CONFIG"), 
+        "reload_config": False if not yaml_exists else os.getenv("RELOAD_CONFIG"), 
         "disable_start_message": os.getenv("DISABLE_START_MESSAGE"),
         "disable_restart_message": os.getenv("DISABLE_RESTART_MESSAGE"),
         "disable_config_reload_message": os.getenv("DISABLE_CONFIG_RELOAD_MESSAGE"),
@@ -104,8 +79,8 @@ def load_config(official_path="/config/config.yaml"):
         
         "monitor_all_containers": os.getenv("MONITOR_ALL_CONTAINERS"),
         "monitor_all_swarm_services": os.getenv("MONITOR_ALL_SWARM_SERVICES"),
-        "excluded_containers": [c.strip() for c in os.getenv("EXCLUDED_CONTAINERS", "").split(",") if c.strip()] if os.getenv("EXCLUDED_CONTAINERS") else None,
-        "excluded_swarm_services": [s.strip() for s in os.getenv("EXCLUDED_SWARM_SERVICES", "").split(",") if s.strip()] if os.getenv("EXCLUDED_SWARM_SERVICES") else None,
+        "excluded_containers": convert_string_to_list(os.getenv("EXCLUDED_CONTAINERS")) or None,
+        "excluded_swarm_services": convert_string_to_list(os.getenv("EXCLUDED_SWARM_SERVICES")) or None,
 
         # legacy settings (converted to new settings in load_config)
         "notification_title": os.getenv("NOTIFICATION_TITLE"),
@@ -119,7 +94,7 @@ def load_config(official_path="/config/config.yaml"):
         "action_cooldown": os.getenv("ACTION_COOLDOWN"),
         "attachment_lines": os.getenv("ATTACHMENT_LINES"),
         "hide_regex_in_title": os.getenv("HIDE_REGEX_IN_TITLE"),
-        "excluded_keywords": [kw.strip() for kw in os.getenv("EXCLUDED_KEYWORDS", "").split(",") if kw.strip()] if os.getenv("EXCLUDED_KEYWORDS") else None,
+        "excluded_keywords": convert_string_to_list(os.getenv("EXCLUDED_KEYWORDS")) or None,
         "disable_notifications": os.getenv("DISABLE_NOTIFICATIONS"),
         "olivetin_url": os.getenv("OLIVETIN_URL"),
         "olivetin_username": os.getenv("OLIVETIN_USERNAME"),
@@ -127,7 +102,7 @@ def load_config(official_path="/config/config.yaml"):
     } 
     
     # Ntfy notification settings
-    ntfy_values =  {
+    ENV_NTFY =  {
         "url": os.getenv("NTFY_URL"),
         "topic": os.getenv("NTFY_TOPIC"),
         "token": os.getenv("NTFY_TOKEN"),
@@ -142,57 +117,97 @@ def load_config(official_path="/config/config.yaml"):
     }
     
     # Webhook settings
-    webhook_values = {
-        "url": os.getenv("WEBHOOK_URL"),
-        # "headers":os.getenv("WEBHOOK_HEADERS")
-    }
+    ENV_WEBHOOK = {"url": os.getenv("WEBHOOK_URL")}
     
     # Apprise settings
-    apprise_values = {
-        "url": os.getenv("APPRISE_URL")
-    }
+    ENV_APPRISE = {"url": os.getenv("APPRISE_URL")}
     
     # Global keywords from environment
-    global_keywords_values = {
-        "keywords": [kw.strip() for kw in os.getenv("GLOBAL_KEYWORDS", "").split(",") if kw.strip()] if os.getenv("GLOBAL_KEYWORDS") else [],
-        "keywords_with_attachment": [kw.strip() for kw in os.getenv("GLOBAL_KEYWORDS_WITH_ATTACHMENT", "").split(",") if kw.strip()] if os.getenv("GLOBAL_KEYWORDS_WITH_ATTACHMENT") else [],
+    ENV_GLOBAL_KEYWORDS = {
+        "keywords": convert_string_to_list(os.getenv("GLOBAL_KEYWORDS")) or None,
+        "keywords_with_attachment": convert_string_to_list(os.getenv("GLOBAL_KEYWORDS_WITH_ATTACHMENT")) or None,
     }
+    ENV_CONTAINERS = convert_string_to_list(os.getenv("CONTAINERS"))
+    ENV_SWARM_SERVICES = convert_string_to_list(os.getenv("SWARM_SERVICES"))
     
     # Fill env_config dict with environment variables if they are set
-    if os.getenv("CONTAINERS"):
-        env_config["containers"] = {}
-        for c in os.getenv("CONTAINERS", "").split(","):
-            c = c.strip()
-            env_config["containers"][c] = {}
+    env_config = {
+        "notifications": {}, 
+        "settings": {}, 
+        "global_keywords": {},
+        "containers": {},
+        "swarm_services": {},
+    }
+    for container in ENV_CONTAINERS:
+        env_config["containers"][container] = {}
+    for swarm_service in ENV_SWARM_SERVICES:
+        env_config["swarm_services"][swarm_service] = {}
 
-    if os.getenv("SWARM_SERVICES"):
-        env_config["swarm_services"] = {}
-        for s in os.getenv("SWARM_SERVICES", "").split(","):
-            s = s.strip()
-            env_config["swarm_services"][s] = {}
+    if any(ENV_NTFY.values()):
+        env_config["notifications"]["ntfy"] = ENV_NTFY
 
-    # Add notification configs if any values are set
-    if any(ntfy_values.values()):
-        env_config["notifications"]["ntfy"] = ntfy_values
-        yaml_config["notifications"]["ntfy"] = {} if yaml_config["notifications"].get("ntfy") is None else yaml_config["notifications"]["ntfy"]
+    if ENV_APPRISE["url"]: 
+        env_config["notifications"]["apprise"] = ENV_APPRISE
 
-    if apprise_values["url"]: 
-        env_config["notifications"]["apprise"] = apprise_values
+    if ENV_WEBHOOK["url"]:
+        env_config["notifications"]["webhook"] = ENV_WEBHOOK
 
-    if webhook_values.get("url"):
-        env_config["notifications"]["webhook"] = webhook_values
-        yaml_config["notifications"]["webhook"] = {} if yaml_config["notifications"].get("webhook") is None else yaml_config["notifications"]["webhook"]
-
-    # Add global keywords if set
-    for k, v in global_keywords_values.items():
+    for k, v in ENV_GLOBAL_KEYWORDS.items():
         if v:
             env_config["global_keywords"][k]= v
 
     # Add settings if set
-    for key, value in settings_values.items(): 
+    for key, value in ENV_SETTINGS.items(): 
         if value is not None:
             env_config["settings"][key] = value
 
+    return env_config
+
+
+def load_config(official_path="/config/config.yaml"):
+    """
+    Load, merge, and validate the application configuration from YAML and environment variables.
+    Called from app.py
+    Returns: tuple: (validated_config_object, config_file_path_used)
+    """
+    config_path = None
+    yaml_config = None
+    legacy_path = "/app/config.yaml"
+    paths = [official_path, legacy_path]
+    error_messages = []
+    # Try to load YAML config from available paths
+    for path in paths:
+        logging.debug(f"Trying path: {path}")
+        if os.path.isfile(path):
+            config_path = path
+            try:
+                with open(path, "r") as file:
+                    yaml_config = yaml.safe_load(file)
+                    break
+            except yaml.YAMLError as e:
+                error_messages.append(f"Error parsing YAML file at {path}: {e}")
+                logging.error(f"Error parsing YAML file at {path}: {e}")
+            except Exception as e:
+                logging.error(f"Unexpected error loading {path}: {e}")
+                error_messages.append(f"Failed to load {path}: {e}")
+        else:
+            logging.debug(f"The path {path} does not exist.")
+
+    if yaml_config is None:
+        if error_messages:
+            # Don't load config if there are errors with the config file
+            raise ConfigLoadError("\n".join(error_messages))
+        logging.warning(f"No config.yaml found in any location")
+        yaml_config = {}
+    else:
+        logging.info(f"The config.yaml file was found in {config_path}.")
+
+    # Ensure required top-level keys exist in yaml_config
+    for key in TOP_LEVEL_KEYS:
+        if key not in yaml_config or yaml_config[key] is None:
+            yaml_config[key] = {}
+
+    env_config = load_env_config(yaml_exists=yaml_config is not None)
     # Merge environment variables and yaml config
     merged_config = merge_yaml_and_env(yaml_config, env_config)
     merged_config = convert_legacy_formats(merged_config)
@@ -303,11 +318,9 @@ def convert_legacy_formats(config):
                     if isinstance(item, dict):
                         _migrate_field_names(item, old, new, exclude_values)
 
-        # Now perform the migration
         for key in keys_to_migrate:
             logger.debug(f"Migrating field {key} to {new}")
             config_copy[new] = config_copy.pop(key)
-
         return config_copy
         
     config_copy = copy.deepcopy(config)
@@ -324,21 +337,21 @@ def convert_legacy_formats(config):
         _migrate_keywords(global_with_attachment, config_copy["global_keywords"]["keywords"], ("attach_logfile", True))
     
     # Migrate container-level legacy fields
-    for container_object in ["containers", "swarm_services"]:
-        if container_object not in config_copy:
+    for unit_type in ["containers", "swarm_services"]:
+        if unit_type not in config_copy:
             continue
-        for container_config in config_copy.get(container_object, {}).values():
-            if container_config is None:
+        for unit_config in config_copy.get(unit_type, {}).values():
+            if unit_config is None:
                 continue
-            container_config.setdefault("keywords", [])
+            unit_config.setdefault("keywords", [])
             
             # Migrate keywords_with_attachment
-            keywords_with_attachment = container_config.pop("keywords_with_attachment", None)
+            keywords_with_attachment = unit_config.pop("keywords_with_attachment", None)
             if keywords_with_attachment is not None:
-                _migrate_keywords(keywords_with_attachment, container_config["keywords"], ("attach_logfile", True))
+                _migrate_keywords(keywords_with_attachment, unit_config["keywords"], ("attach_logfile", True))
             
             # Migrate action_keywords (legacy action format)
-            action_keywords = container_config.pop("action_keywords", None)
+            action_keywords = unit_config.pop("action_keywords", None)
             if action_keywords is not None:
                 for item in action_keywords:
                     if isinstance(item, dict):
@@ -351,9 +364,9 @@ def convert_legacy_formats(config):
                         if action:
                             keyword = item[action]
                             if isinstance(keyword, dict) and "regex" in keyword:
-                                container_config["keywords"].append({"regex": keyword["regex"], "action": action})
+                                unit_config["keywords"].append({"regex": keyword["regex"], "action": action})
                             elif isinstance(keyword, str):
-                                container_config["keywords"].append({"keyword": keyword, "action": action})
+                                unit_config["keywords"].append({"keyword": keyword, "action": action})
     return config_copy
 
 
