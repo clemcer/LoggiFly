@@ -60,7 +60,7 @@ def process_trigger(
             title=title,
             message=message,
             modular_settings=modular_settings,
-            template_fields=notification_context.to_dict(),
+            notification_context=notification_context,
             attachment=attachment,
         )
 
@@ -78,8 +78,8 @@ def process_trigger(
                 config,
                 title=title,
                 message=message,
-                template_fields=notification_context.to_dict(),
+                notification_context=notification_context,
                 attachment=attachment,
                 modular_settings=modular_settings,
-            ),
+            )
         )

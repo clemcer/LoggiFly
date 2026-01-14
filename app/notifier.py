@@ -10,6 +10,7 @@ import urllib.parse
 from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfig
 from email.header import Header
 from constants import EMOJI_PATTERN
+from notification_formatter import NotificationContext
 
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
@@ -275,7 +276,7 @@ def send_notification(config: GlobalConfig,
                       message: str,
                       modular_settings: dict | None = None,
                       attachment: dict | None = None,
-                      template_fields: dict | None = None
+                      notification_context: NotificationContext | None = None,
                       ):
     """
     Dispatch a notification using ntfy, Apprise, and/or webhook based on configuration.
@@ -295,11 +296,23 @@ def send_notification(config: GlobalConfig,
     if apprise_url:
         send_apprise_notification(apprise_url, message=message, title=title, attachment=attachment)
     
-    json_data = template_fields or {}
-    json_data.update({"title": title})
-    json_data.update({"message": message})
-    logger.debug(f"JSON DATA: {json_data}")
     # Send webhook notification if configured
     if (webhook_config and webhook_config.get("url")):
+        if notification_context:
+            json_data = {
+                "title": title,
+                "message": message,
+                "info_fields": notification_context.get_defaults() or {},
+                "log_fields": {
+                    "json_fields": notification_context.get_json_fields() or {},
+                    "regex_fields": notification_context.get_regex_fields() or {},
+                },
+            }
+        else:
+            json_data = {
+                "title": title,
+                "message": message,
+            }
+        logger.debug(f"JSON DATA: {json_data}")
         send_webhook(json_data, webhook_config)
 

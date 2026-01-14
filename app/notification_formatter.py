@@ -89,7 +89,7 @@ def _partial_format(template: str, data: Dict[str, Any]) -> tuple[str, set]:
     return result, all_missing_keys
 
 
-def _extract_fields_from_json(log_line: str) -> Dict[str, Any]:
+def extract_fields_from_json(log_line: str) -> Dict[str, Any]:
     """Parse a log line as JSON; return fields or empty dict on failure."""
     if not log_line:
         return {}
@@ -102,7 +102,7 @@ def _extract_fields_from_json(log_line: str) -> Dict[str, Any]:
         return {}
 
 
-def _extract_fields_from_regex(log_line: str, regex: Optional[str]) -> Dict[str, Any]:
+def extract_fields_from_regex(log_line: str, regex: Optional[str]) -> Dict[str, Any]:
     """Extract named capture groups from regex applied to the log line."""
     if not (log_line and regex):
         return {}
@@ -115,24 +115,6 @@ def _extract_fields_from_regex(log_line: str, regex: Optional[str]) -> Dict[str,
     except Exception as e:
         logger.error(f"Unexpected error extracting fields from regex: {e}")
         return {}
-
-
-def get_template_fields(
-    log_line: str,
-    regex: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Collect candidate template fields from a log line.
-
-    - include JSON fields and regex named groups (if regex provided)
-    """
-    fields: Dict[str, Any] = {}
-    fields.update(_extract_fields_from_json(log_line))
-    if regex:
-        for key, value in _extract_fields_from_regex(log_line, regex).items():
-            fields.setdefault(key, value)
-    return fields
-
 
 def default_title_for_log_match(
     keywords_found: List[str],
@@ -206,14 +188,8 @@ class NotificationContext:
             self.stack_name = self.container_snapshot.stack_name if not self.stack_name else self.stack_name
             self.container_name = self.container_snapshot.name if not self.container_name else self.container_name
 
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Build the base dict used for templating. Order of precedence:
-        1) explicit extra_fields
-        2) extracted fields from log_line / regex
-        3) canonical defaults (container, keywords, keyword, event, hostname, monitor_type)
-        """
-        # Convert Unix timestamp to datetime or use current time
+    def get_defaults(self) -> Dict[str, Any]:
+                # Convert Unix timestamp to datetime or use current time
         if self.time is not None:
             try:
                 dt = datetime.fromtimestamp(self.time)
@@ -261,11 +237,30 @@ class NotificationContext:
             "action_succeeded": self.action_succeeded,
         }
 
-        extracted = get_template_fields(self.log_line, regex=self.regex) if self.log_line else {}
+        return defaults
+
+    def get_regex_fields(self) -> Dict[str, Any]:
+        return extract_fields_from_regex(self.log_line, self.regex) if self.log_line and self.regex else {}
+    
+    def get_json_fields(self) -> Dict[str, Any]:
+        return extract_fields_from_json(self.log_line) if self.log_line else {}
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Build the base dict used for templating. Order of precedence:
+        1) explicit extra_fields
+        2) extracted fields from json if log entry is json
+        3) extracted fields from regex named groups
+        4) canonical defaults (container, keywords, keyword, event, hostname, monitor_type)
+        """
+        defaults = self.get_defaults()
+        regex_fields = self.get_regex_fields()
+        json_fields = self.get_json_fields()
 
         ctx: Dict[str, Any] = {}
         ctx.update(defaults)
-        ctx.update(extracted)
+        ctx.update(regex_fields)
+        ctx.update(json_fields)
         ctx.update(self.extra_fields or {})
         return ctx
 
