@@ -109,7 +109,7 @@ If you don't want to use a socket proxy, maybe because you want to use the [`act
 version: "3.8"
 services:
   loggifly:
-    image: ghcr.io/clemcer/loggifly-dev:dev 
+    image: ghcr.io/clemcer/loggifly:latest
     container_name: loggifly
     # It is recommended to set the user so that the container does not run as root
     user: 1000:1000
