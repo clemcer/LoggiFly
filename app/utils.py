@@ -1,8 +1,13 @@
-import time
+from dataclasses import dataclass
 import logging
 from config.config_model import ModularSettings
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class LogAttachment:
+    content: str
+    file_name: str
 
 def _union_lists(first: list, second: list) -> list:
     """Return union preserving order with `first` items first."""

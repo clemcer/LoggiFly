@@ -1,16 +1,16 @@
 import requests
 import apprise
-import tempfile
 import os
 import base64
 import logging
 from pydantic import SecretStr
-from utils import merge_with_precedence
 import urllib.parse
-from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfig
+from config.config_model import GlobalConfig
 from email.header import Header
 from constants import EMOJI_PATTERN
 from notification_formatter import NotificationContext
+from utils import merge_with_precedence, LogAttachment
+
 
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
@@ -129,7 +129,7 @@ def get_notification_config(modular_settings: dict, global_service_config: dict,
     )
 
 
-def send_apprise_notification(url, message, title, attachment: dict | None = None):
+def send_apprise_notification(url, message, title, attachment: LogAttachment | None = None):
     """
     Send a notification using Apprise.
     Optionally attaches a file. Message is truncated if too long.
@@ -139,8 +139,9 @@ def send_apprise_notification(url, message, title, attachment: dict | None = Non
     try:
         apobj = apprise.Apprise()
         apobj.add(url)
-        if attachment and (file_content := attachment.get("content", "")):
-            file_name = attachment.get("file_name", "attachment.log")
+        if attachment:
+            file_content = attachment.content
+            file_name = attachment.file_name
             # /dev/shm works even when the container is read_only
             file_path = None
             try:
@@ -183,10 +184,9 @@ def send_apprise_notification(url, message, title, attachment: dict | None = Non
                 pass
 
 
-def send_ntfy_notification(ntfy_config, message, title, attachment: dict | None =None):
+def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachment | None =None):
     """
     Send a notification via ntfy with optional file attachment.
-    Handles authorization and message truncation.
     """
     message = ("This message had to be shortened: \n" if len(message) > 3900 else "") + message[:3900]
     
@@ -220,8 +220,9 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: dict | None 
     if ntfy_config.get("headers"):
         headers.update(ntfy_config.get("headers"))
     try:
-        if attachment and (file_content := attachment.get("content", "").encode("utf-8")):
-            headers["Filename"] = attachment.get("file_name", "attachment.txt")
+        if attachment:
+            file_content = attachment.content.encode("utf-8")
+            headers["Filename"] = attachment.file_name
             # When attaching a file the message can not be passed normally.
             # So if the message is short, include it as query param, else omit it
             if len(message) < 199:
@@ -275,7 +276,7 @@ def send_notification(config: GlobalConfig,
                       title: str, 
                       message: str,
                       modular_settings: dict | None = None,
-                      attachment: dict | None = None,
+                      attachment: LogAttachment | None = None,
                       notification_context: NotificationContext | None = None,
                       ):
     """

@@ -1,6 +1,6 @@
 import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import threading
 from threading import Thread, Lock
 from config.config_model import GlobalConfig, KeywordItem, RegexItem, KeywordGroup, ContainerConfig, SwarmServiceConfig
@@ -268,47 +268,43 @@ class LogProcessor:
         with self.kw_time_lock:
             self.time_per_keyword[key] = time.time()
 
-    def _search_keyword(self, log_line, keyword_dict, ignore_keyword_time=False):
+
+    def _search_keyword(self, log_line: str, keyword_dict: dict, ignore_keyword_time: bool = False) -> str | tuple | None:
         """
         Search for keyword or regex in log_line. Enforce notification cooldown unless ignore_keyword_time is True.
         Returns:
             str or None: The matched keyword/regex or None if no match or on cooldown
         """
-        if keyword_dict.get("notification_cooldown"):
-            notification_cooldown = keyword_dict["notification_cooldown"]
-        else:
-            notification_cooldown = self.unit_modular_settings.get("notification_cooldown", 10)
-        log_line = log_line.lower()
+        def get_keyword_setting(key: str, default: Any = None) -> Any:
+            if keyword_dict.get(key) is not None:
+                return keyword_dict[key]
+            elif self.unit_modular_settings.get(key) is not None:
+                return self.unit_modular_settings[key]
+            return default
+
+        notification_cooldown = get_keyword_setting("notification_cooldown", 10)
+        regex_case_sensitive = get_keyword_setting("regex_case_sensitive", True)
+        log_line = log_line.lower() if not regex_case_sensitive else log_line
         
-        if "regex" in keyword_dict:
-            regex = keyword_dict["regex"]
-            if not regex:
-                self.logger.error(f"Regex is empty for {keyword_dict}")
-                return None
+        if regex := keyword_dict.get("regex"):
             if self._cooldown_is_expired(regex, notification_cooldown, ignore_keyword_time):
-                match = re.search(regex, log_line, re.IGNORECASE)
+                match = re.search(regex, log_line, re.IGNORECASE if not regex_case_sensitive else 0)
                 if match:
                     self._set_keyword_time(regex)
                     hide_pattern = keyword_dict.get("hide_regex_in_title") if keyword_dict.get("hide_regex_in_title") else self.unit_modular_settings.get("hide_regex_in_title", False)
                     return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
-        elif "keyword" in keyword_dict:
-            keyword = keyword_dict["keyword"]
-            if not keyword:
-                self.logger.error(f"Keyword is empty for {keyword_dict}")
-                return None
+        elif keyword := keyword_dict.get("keyword"):
             if self._cooldown_is_expired(keyword, notification_cooldown, ignore_keyword_time):
                 if keyword.lower() in log_line:
                     self._set_keyword_time(keyword)
                     return keyword
-        elif "keyword_group" in keyword_dict:
-            keyword_group = keyword_dict["keyword_group"]
-            if not keyword_group:
-                self.logger.error(f"Keyword group is empty for {keyword_dict}")
-                return None
+        elif keyword_group := keyword_dict.get("keyword_group"):
             if self._cooldown_is_expired(keyword_group, notification_cooldown, ignore_keyword_time):
                 if all(keyword.lower() in log_line for keyword in keyword_group):
                     self._set_keyword_time(keyword_group)
                     return keyword_group
+        else:
+            self.logger.error(f"No keyword or regex found for {keyword_dict}")
         return None
 
     def _search_and_send(self, log_line):
@@ -330,7 +326,6 @@ class LogProcessor:
             
         # When an excluded keyword is found, the log line gets ignored and the function returns
         if ek := (keyword_level_config.get("excluded_keywords") or []) + (self.unit_modular_settings.get("excluded_keywords") or []):
-            self.logger.debug(f"Excluded keywords: {ek}")
             for keyword in self._get_keywords(ek):
                 found = self._search_keyword(log_line, keyword, ignore_keyword_time=True)
                 if found:
@@ -344,8 +339,6 @@ class LogProcessor:
                     + f"{formatted_log_entry}"
                     )
         self.logger.debug(f"Keyword level config: {keyword_level_config}")
-        # self.logger.debug(f"Excluded keywords: {self._get_keywords(keyword_level_config.get('excluded_keywords') or [])}")
-        self.logger.debug(f"OliveTin actions: {keyword_level_config.get('olivetin_actions') or []}")
         
         notification_context = NotificationContext(
             notification_type=NotificationType.LOG_MATCH,

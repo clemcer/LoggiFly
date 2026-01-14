@@ -5,7 +5,7 @@ import re
 import time
 import logging
 import traceback
-from typing import Any, Optional
+from typing import Any
 from docker.models.containers import Container
 from docker.client import DockerClient
 import docker.errors

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from notification_formatter import NotificationContext, render_title, render_message
 from notifier import send_notification
 from services import trigger_olivetin_action
+from utils import LogAttachment
 
 if TYPE_CHECKING:
     from docker_monitoring.monitor import DockerLogMonitor, MonitoredContainerContext
@@ -25,7 +26,7 @@ def process_trigger(
 
     # Perform container action if configured
     if action_to_perform is not None:
-        action_result = monitor_instance.perform_container_action(
+        action_result: ContainerActionResult = monitor_instance.perform_container_action(
             modular_settings.get("action_cooldown", 300),
             action_to_perform,
             unit_context.container_name,
@@ -39,12 +40,15 @@ def process_trigger(
     logger.debug(f"\n\nNotification context:\n{notification_context.to_dict()}\n\n")
 
     # Create log file attachment if requested
-    attachment = None
+    attachment: LogAttachment | None = None
     attach_logfile = modular_settings.get("attach_logfile", False)
     attachment_lines = modular_settings.get("attachment_lines", 20) if isinstance(modular_settings.get("attachment_lines"), int) else 20
     if attach_logfile:
         if result := monitor_instance.tail_logs(unit_context.container_id, attachment_lines):
-            attachment = {"content": result, "file_name": f"last_{attachment_lines}_lines_from_{unit_context.unit_name}.log"}
+            attachment = LogAttachment(
+                content=result, 
+                file_name=f"last_{attachment_lines}_lines_from_{unit_context.unit_name}.log",
+            )
         else:
             logger.error(f"Could not create log attachment file for {unit_context.unit_name}")
     

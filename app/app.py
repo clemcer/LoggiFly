@@ -42,6 +42,7 @@ class DockerClientInfo:
     hostname: str | None
     monitor: DockerLogMonitor | None = None
 
+
 def get_title_prefix(docker_hosts: List[DockerClientInfo]) -> str:
     """ 
     In swarm mode user might want to differentiate between LoggiFly instances on different nodes 
@@ -50,6 +51,7 @@ def get_title_prefix(docker_hosts: List[DockerClientInfo]) -> str:
         if m.swarm_mode and m.host_identifier:
             return f"[{docker_hosts[0].monitor.host_identifier}] - "
     return ""
+
 
 def create_handle_signal(docker_hosts: List[DockerClientInfo], config, config_observer):
     """

@@ -4,7 +4,6 @@ from pydantic import (
     model_validator,
     ConfigDict,
     SecretStr,
-    ValidationError,
     Field,
 )
 from typing import Literal
@@ -84,6 +83,7 @@ class Settings(BaseConfigModel):
     action_cooldown: Optional[int] = 300
     attachment_lines: int = 20
     hide_regex_in_title: Optional[bool] = False
+    regex_case_sensitive: bool = False
     excluded_keywords: Optional[List[Union[str, ExcludedKeywords]]] = None
     disable_notifications: Optional[bool] = None
     olivetin_url: Optional[str] = None
@@ -119,6 +119,7 @@ class ModularSettings(BaseConfigModel):
     webhook_url: Optional[str] = None
     webhook_headers: Optional[dict] = None
 
+    regex_case_sensitive: Optional[bool] = None
     attachment_lines: Optional[int] = None
     notification_cooldown: Optional[int] = None
     title_template: Optional[str] = None

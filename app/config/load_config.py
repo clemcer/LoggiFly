@@ -1,14 +1,12 @@
 import os
 import logging
 import copy
-from docker import errors
 import yaml
+from pydantic import ValidationError, SecretStr
 from .config_model import (
     GlobalConfig,
     SwarmServiceConfig,
     ContainerConfig,
-    ValidationError,
-    SecretStr
 )
 from constants import MonitorType
 
