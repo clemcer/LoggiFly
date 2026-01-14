@@ -486,8 +486,8 @@ class DockerLogMonitor:
         configured_not_running = sorted(set(selected_containers) - monitored_set)
         container_block = "\n\n".join(
             s for s in [
-                format_section("✅ Running & monitored containers", monitored_containers),
-                format_section("❌ Configured but not running containers", configured_not_running),
+                format_section(f"✅ Running & monitored containers ({len(monitored_containers)})", monitored_containers),
+                format_section(f"❌ Configured but not running containers ({len(configured_not_running)})", configured_not_running),
             ]
             if s
         )
@@ -498,8 +498,8 @@ class DockerLogMonitor:
         swarm_services_not_running = sorted(set(selected_swarm_services) - monitored_swarm_service_keys)
         swarm_block = "\n\n".join(
             s for s in [
-                format_section("✅ Running & monitored Swarm tasks (containers)", monitored_swarm_tasks),
-                format_section("❌ Swarm services not running", swarm_services_not_running),
+                format_section(f"✅ Running & monitored Swarm tasks / containers ({len(monitored_swarm_tasks)})", monitored_swarm_tasks),
+                format_section(f"❌ Swarm services not running ({len(swarm_services_not_running)})", swarm_services_not_running),
             ]
             if s
         )
