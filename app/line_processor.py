@@ -292,12 +292,16 @@ class LogProcessor:
             notification_cooldown = keyword_dict["notification_cooldown"]
         else:
             notification_cooldown = self.container_msg_cnf.get("notification_cooldown", 10)
-        log_line = log_line.lower()
+        log_line_match = log_line
+        case_sensitive = keyword_dict.get("case_sensitive", False)
+        if not case_sensitive:
+            log_line_match = log_line.lower()
         
         if "regex" in keyword_dict:
             regex = keyword_dict["regex"]
             if ignore_keyword_time or time.time() - self.time_per_keyword.get(regex, 0) >= int(notification_cooldown):
-                match = re.search(regex, log_line, re.IGNORECASE)
+                flags = 0 if case_sensitive else re.IGNORECASE
+                match = re.search(regex, log_line_match, flags)
                 if match:
                     self.time_per_keyword[regex] = time.time()
                     hide_pattern = keyword_dict.get("hide_regex_in_title") if keyword_dict.get("hide_regex_in_title") else self.container_msg_cnf["hide_regex_in_title"]
@@ -305,13 +309,21 @@ class LogProcessor:
         elif "keyword" in keyword_dict:
             keyword = keyword_dict["keyword"]
             if ignore_keyword_time or time.time() - self.time_per_keyword.get(keyword, 0) >= int(notification_cooldown):
-                if keyword.lower() in log_line:
+                if not case_sensitive:
+                    keyword = keyword.lower()
+                if keyword in log_line_match:
                     self.time_per_keyword[keyword] = time.time()
                     return keyword
         elif "keyword_group" in keyword_dict:
             keyword_group = keyword_dict["keyword_group"]
             if ignore_keyword_time or time.time() - self.time_per_keyword.get(keyword_group, 0) >= int(notification_cooldown):
-                if all(keyword.lower() in log_line for keyword in keyword_group):
+                if not case_sensitive:
+                    keywords_to_check = [keyword.lower() for keyword in keyword_group]
+                    log_line_check = log_line_match
+                else:
+                    keywords_to_check = keyword_group
+                    log_line_check = log_line
+                if all(keyword in log_line_check for keyword in keywords_to_check):
                     self.time_per_keyword[keyword_group] = time.time()
                     return keyword_group
         return None
@@ -476,7 +488,11 @@ def get_template_fields(message_config: dict, log_line: str, mode=None):
     if not mode or mode == "regex":
         # Apply template in case of regex named capturing groups
         if message_config.get("regex"):
-            match = re.search(message_config["regex"], log_line, re.IGNORECASE)
+            case_sensitive = message_config.get("case_sensitive", False)
+            flags = 0 if case_sensitive else re.IGNORECASE
+            log_line_match = log_line if case_sensitive else log_line.lower()
+            # For capturing groups, we need to use the original log line but search with the appropriate flags
+            match = re.search(message_config["regex"], log_line, flags)
             if match:
                 groups = match.groupdict()
                 for key, value in groups.items():

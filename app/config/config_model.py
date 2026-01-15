@@ -86,6 +86,7 @@ class Settings(BaseConfigModel):
     action_cooldown: Optional[int] = 300
     attachment_lines: int = 20
     hide_regex_in_title: Optional[bool] = False
+    case_sensitive: Optional[bool] = False
     excluded_keywords: Optional[List[Union[str, ExcludedKeywords]]] = None
     disable_notifications: Optional[bool] = None
     olivetin_url: Optional[str] = None
@@ -212,12 +213,14 @@ class RegexItem(KeywordItemBase):
     """
     regex: str
     template: Optional[str] = None # legacy
+    case_sensitive: Optional[bool] = False
 
 class KeywordItem(KeywordItemBase):
     """
     Model for a string-based keyword with optional settings.
     """
     keyword: str
+    case_sensitive: Optional[bool] = False
 
 
 class KeywordGroup(KeywordItemBase):
@@ -226,6 +229,7 @@ class KeywordGroup(KeywordItemBase):
     All keywords in the group must match for the group to trigger.
     """
     keyword_group: List[Union[str, KeywordItem, RegexItem]] = []
+    case_sensitive: Optional[bool] = False
 
 
 class KeywordBase(BaseModel):
