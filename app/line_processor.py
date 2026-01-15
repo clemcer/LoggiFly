@@ -243,7 +243,7 @@ class LogProcessor:
                         self._handle_and_clear_buffer()
                     self.buffer.append(line)
                     break
-        # Otherwise, append to current buffer (continuation of previous entry)
+            # Otherwise, append to current buffer (continuation of previous entry)
             else:
                 if self.buffer:
                     self.buffer.append(line)
@@ -284,23 +284,22 @@ class LogProcessor:
 
         notification_cooldown = get_keyword_setting("notification_cooldown", 10)
         regex_case_sensitive = get_keyword_setting("regex_case_sensitive", True)
-        log_line = log_line.lower() if not regex_case_sensitive else log_line
-        
+
         if regex := keyword_dict.get("regex"):
             if self._cooldown_is_expired(regex, notification_cooldown, ignore_keyword_time):
                 match = re.search(regex, log_line, re.IGNORECASE if not regex_case_sensitive else 0)
                 if match:
                     self._set_keyword_time(regex)
-                    hide_pattern = keyword_dict.get("hide_regex_in_title") if keyword_dict.get("hide_regex_in_title") else self.unit_modular_settings.get("hide_regex_in_title", False)
+                    hide_pattern = get_keyword_setting("hide_regex_in_title", False)
                     return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
         elif keyword := keyword_dict.get("keyword"):
             if self._cooldown_is_expired(keyword, notification_cooldown, ignore_keyword_time):
-                if keyword.lower() in log_line:
+                if keyword.lower() in log_line.lower():
                     self._set_keyword_time(keyword)
                     return keyword
         elif keyword_group := keyword_dict.get("keyword_group"):
             if self._cooldown_is_expired(keyword_group, notification_cooldown, ignore_keyword_time):
-                if all(keyword.lower() in log_line for keyword in keyword_group):
+                if all(keyword.lower() in log_line.lower() for keyword in keyword_group):
                     self._set_keyword_time(keyword_group)
                     return keyword_group
         else:

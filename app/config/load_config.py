@@ -92,6 +92,7 @@ def load_env_config(yaml_exists: bool):
         "action_cooldown": os.getenv("ACTION_COOLDOWN"),
         "attachment_lines": os.getenv("ATTACHMENT_LINES"),
         "hide_regex_in_title": os.getenv("HIDE_REGEX_IN_TITLE"),
+        "regex_case_sensitive": os.getenv("REGEX_CASE_SENSITIVE"),
         "excluded_keywords": convert_string_to_list(os.getenv("EXCLUDED_KEYWORDS")) or None,
         "disable_notifications": os.getenv("DISABLE_NOTIFICATIONS"),
         "olivetin_url": os.getenv("OLIVETIN_URL"),
