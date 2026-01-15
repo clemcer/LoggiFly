@@ -65,10 +65,12 @@ def merge_modular_settings(precedence: dict, fallback: dict) -> dict:
 
 
 def convert_to_int(val, fallback_value: int = 0, min_value: int = 0) -> int:
+    if val is None:
+        return fallback_value
     try:
         val = int(val)
         if val < min_value:
             return fallback_value
         return val
-    except ValueError:
+    except (ValueError, TypeError):
         return fallback_value

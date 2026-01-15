@@ -20,6 +20,7 @@ from watchdog.events import FileSystemEventHandler
 from config.load_config import load_config, format_pydantic_error, ConfigLoadError
 from docker_monitoring.monitor import DockerLogMonitor
 from notifier import send_notification
+from utils import convert_to_int
 
 logging.basicConfig(
     level="INFO",
@@ -190,10 +191,43 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
     Returns:
         Thread: The monitoring thread
     """
+    health_enabled = os.getenv("ENABLE_HEALTHCHECK", "").strip().lower() == "true"
+    heartbeat_path = os.getenv("HEARTBEAT_PATH", "/dev/shm/loggifly-heartbeat") # works in read_only containers
+    heartbeat_interval = convert_to_int(os.getenv("HEARTBEAT_INTERVAL", "60"), fallback_value=60, min_value=3)
+
+    logging.debug(
+        f"Healthcheck enabled with interval {heartbeat_interval}s and path {heartbeat_path}" if health_enabled else "Healthcheck is disabled"
+    )
+
+    def write_heartbeat(any_active: bool):
+        """Write or delete the heartbeat, depending on the active monitor status."""
+        if not health_enabled:
+            return
+        if any_active:
+            try:
+                with open(heartbeat_path, "w") as f:
+                    f.write(str(int(time.time())))
+            except OSError as e:
+                logging.debug(f"Could not write heartbeat file {heartbeat_path}: {e}")
+            except Exception as e:
+                logging.debug(f"Unexpected error writing heartbeat file {heartbeat_path}: {e}")
+        else:
+            try:
+                os.remove(heartbeat_path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logging.debug(f"Could not remove heartbeat file {heartbeat_path}: {e}") 
+            except Exception as e:
+                logging.debug(f"Unexpected error removing heartbeat file {heartbeat_path}: {e}")
+
     def check_and_reconnect():
         """Main monitoring loop for connection status."""
+        first_iteration = True
         while not global_shutdown_event.is_set():
-            global_shutdown_event.wait(timeout=60)
+            global_shutdown_event.wait(timeout=heartbeat_interval if not first_iteration else min(heartbeat_interval, 5))
+            first_iteration = False
+            any_active_monitor = False
             for host_info in docker_host_infos:
                 host_url = host_info.host_url
                 tls_config = host_info.tls_config
@@ -202,10 +236,14 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
                 if not monitor:
                     logging.warning(f"Monitor not found for {host_url} ({label})")
                     continue
-                if monitor.shutdown_event.is_set():
+                    
+                if not monitor.shutdown_event.is_set():
+                    any_active_monitor = True 
+                else:
                     while monitor.cleanup_event.is_set():
                         time.sleep(1)
                     if global_shutdown_event.is_set():
+                        write_heartbeat(any_active=False)
                         return
                     new_client = None
                     try:    
@@ -220,6 +258,9 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
                         monitor.client = new_client
                         monitor.start()
                         monitor.reload_config(None)
+                        any_active_monitor = True
+            
+            write_heartbeat(any_active=any_active_monitor)
 
     thread = threading.Thread(target=check_and_reconnect, daemon=True)
     thread.start()
