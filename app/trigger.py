@@ -21,7 +21,6 @@ def process_trigger(
     unit_context: "MonitoredContainerContext",
     notification_context: NotificationContext,
 ):
-    logger.debug(f"\n\nProcessing trigger for {unit_context.unit_name} with modular settings:\n{modular_settings} and trigger level config:\n{trigger_level_config}\n\n")
     action_to_perform = trigger_level_config.get("action")
 
     # Perform container action if configured
@@ -37,7 +36,6 @@ def process_trigger(
         # append action result no matter which outcome
         notification_context.action_result = action_result.message
         notification_context.action_succeeded = action_result.success
-    logger.debug(f"\n\nNotification context:\n{notification_context.to_dict()}\n\n")
 
     # Create log file attachment if requested
     attachment: LogAttachment | None = None
@@ -56,8 +54,7 @@ def process_trigger(
     disable_notifications = modular_settings.get("disable_notifications", False)
     if disable_notifications:
         logger.debug(f"Not sending notification for {unit_context.unit_name} because notifications are disabled.")
-    
-    if not disable_notifications:
+    else:
         title = render_title(notification_context, template=modular_settings.get("title_template"))
         message = render_message(notification_context, template=modular_settings.get("message_template"))
         send_notification(config,

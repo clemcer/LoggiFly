@@ -232,7 +232,7 @@ class DockerLogMonitor:
         self.configured_stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_CONFIGURED"), fallback_value=24*7)
         self.stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED"), fallback_value=24)
         self.cleanup_interval_minutes = convert_to_int(os.getenv("CLEANUP_INTERVAL_MINUTES"), fallback_value=60, min_value=1)
-        self._start_cleanup_thread()
+        self._start_context_cleanup_thread()
 
 
     def _get_swarm_identifier(self) -> str | None:
@@ -268,12 +268,12 @@ class DockerLogMonitor:
         self.logger.propagate = False
 
 
-    def _start_cleanup_thread(self):
+    def _start_context_cleanup_thread(self):
         def cleanup_stale_contexts():
             while not self.shutdown_event.is_set():
                 removed = self._registry.cleanup_stale_contexts(self.stale_threshold_hours, self.configured_stale_threshold_hours)
                 if removed > 0:
-                    self.logger.info(f"Removed {removed} stale contexts.")
+                    self.logger.debug(f"Removed {removed} stale contexts.")
                 self.shutdown_event.wait(self.cleanup_interval_minutes * 60)
 
         thread = threading.Thread(target=cleanup_stale_contexts, daemon=True)
@@ -304,7 +304,6 @@ class DockerLogMonitor:
             self.logger.debug(traceback.format_exc())
             return False
 
-        # Log decision
         if not decision.should_monitor:
             if decision.result == MonitorDecision.Result.SKIP:
                 self.logger.debug(f"Skipping {snapshot.name}: {decision.reason}")
@@ -322,8 +321,6 @@ class DockerLogMonitor:
                 f"Monitoring {unit_name} via docker labels.\
                 \nConfig:\n{get_pretty_yaml_config(decision.unit_config, top_level_key=unit_name)}"
                 )
-        else:
-            self.logger.info(f"Starting monitoring for {unit_name}: {decision.reason}")
 
         container_context = self._prepare_monitored_container_context(container, snapshot, decision)
         container_context.currently_configured = True
@@ -440,7 +437,7 @@ class DockerLogMonitor:
                 )
                 if decision.should_stop:
                     if not ctx.monitoring_stopped_event.is_set():
-                        self.logger.info(f"Stopping monitoring for {ctx.unit_name}: {decision.reason}")
+                        self.logger.debug(f"Stopping monitoring for {ctx.unit_name}: {decision.reason}")
                         self._stop_and_close_stream(ctx, wait_for_thread=False)
                     ctx.currently_configured = False
                 elif decision.should_monitor:
@@ -450,7 +447,6 @@ class DockerLogMonitor:
                     ctx.unit_config = decision.unit_config
                     ctx.processor.load_config_variables(self.config, ctx.unit_config)
                     ctx.currently_configured = True
-                    self.logger.debug(f"Updated config for {ctx.unit_name}: {decision.reason}")
             # start monitoring containers that are in the config but not monitored yet
             for container in self.client.containers.list():
                 # Only start monitoring containers that are newly added to the config.yaml and not monitored yet
@@ -552,10 +548,10 @@ class DockerLogMonitor:
             try:
                 container.reload()
                 if container.status != "running":
-                    self.logger.debug(f"Container {container.name} is not running. Stopping monitoring.")
+                    self.logger.info(f"Container {container.name} is not running. Stopping monitoring  for old thread.")
                     return False
                 if container.attrs['State']['StartedAt'] != container_start_time:
-                    self.logger.debug(f"Container {container.name}: Stopping monitoring for old thread.")
+                    self.logger.info(f"Container {container.name}: Stopping monitoring for old thread.")
                     return False
             except docker.errors.NotFound:
                 self.logger.error(f"Container {container.name} not found during container check. Stopping monitoring.")
@@ -627,7 +623,7 @@ class DockerLogMonitor:
                     if self.shutdown_event.is_set():
                         break
                     if gen != container_context.generation:  # if there is a new thread running for this container this thread stops
-                        self.logger.debug(f"{unit_name}: Stopping monitoring thread because a new thread was started for this container.")
+                        self.logger.debug(f"{unit_name}: Stopping monitoring for old thread because a new thread was started for this container.")
                         break
                     if stop_monitoring_event.is_set() or too_many_errors or not_found_error \
                     or check_container(container_start_time, error_count) is False:
@@ -684,10 +680,7 @@ class DockerLogMonitor:
                                 self.logger.debug(f"Docker Event Handler: Container {container_id} not found.")
                             if container and self._maybe_monitor_container(container):
                                 if self.config.settings.disable_monitor_event_message is False:
-                                    if ctx := self._registry.get_by_id(container.id):
-                                        unit_name = ctx.unit_name
-                                    else:
-                                        unit_name = container_name
+                                    unit_name = ctx.unit_name if (ctx := self._registry.get_by_id(container.id)) else container_name
                                     # TODO: maybe add template fields
                                     send_notification(self.config, title=self.loggifly_notification_title, message=f"Monitoring new container: {unit_name}")
 
@@ -732,7 +725,6 @@ class DockerLogMonitor:
             return
         ce = next((ce for ce in configured_events if ce.event == event_type), None)
         if not ce:
-            self.logger.info(f"Event {event_type} for container {ctx.unit_name} is not configured. Skipping event.")
             return
         self.logger.debug(f"Event {event_type} for container {ctx.unit_name} is configured. Processing event.")
         unit_modular_settings = merge_modular_settings(ctx.unit_config.model_dump(), self.config.settings.model_dump())

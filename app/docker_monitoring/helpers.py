@@ -312,7 +312,6 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
     config = {}
     if labels.get("loggifly.monitor", "false").lower() != "true":
         return config
-    logging.debug("Parsing loggifly monitor labels...")
     for key, value in labels.items():
         if not key.startswith("loggifly."):
             continue
@@ -364,7 +363,7 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
         config["container_events"] = [container_events_by_index[k] for k in sorted(container_events_by_index)]
         if container_events_to_append:
             config["container_events"].extend(container_events_to_append)    
-    logging.debug(f"Parsed config: {config}")
+    logger.debug(f"Parsed config: {config}")
     return config
 
 def parse_event_type(event: dict) -> str | None:
@@ -375,9 +374,7 @@ def parse_event_type(event: dict) -> str | None:
         return None
     action = event.get("Action", "").strip()
     status = event.get("status", "").strip()
-    logging.debug(f"Action: {action}, Status: {status}")
     exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode")
-    logging.debug(f"Exit Code: {exit_code}")
     if status.startswith("health_status"):
         parts = status.split(":", 1)
         if len(parts) == 2:

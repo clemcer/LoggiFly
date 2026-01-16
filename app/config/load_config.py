@@ -318,7 +318,6 @@ def convert_legacy_formats(config):
                         _migrate_field_names(item, old, new, exclude_values)
 
         for key in keys_to_migrate:
-            logger.debug(f"Migrating field {key} to {new}")
             config_copy[new] = config_copy.pop(key)
         return config_copy
         

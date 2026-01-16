@@ -77,9 +77,12 @@ def _partial_format(template: str, data: Dict[str, Any]) -> tuple[str, set]:
             result = test_template.format_map(safe)
             valid_fields[field] = result
             all_missing_keys.update(safe.missing_keys)
-        except (ValueError, KeyError) as e:
+        except (ValueError, KeyError, TypeError) as e:
             invalid_fields.append((field, str(e)))
             logger.warning(f"Invalid template field '{{{field}}}': {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error testing template field '{field}': {e}")
+            invalid_fields.append((field, str(e)))
 
     # Replace valid fields in the original template
     result = template
@@ -208,7 +211,7 @@ class NotificationContext:
             "container_name": self.container_name,
             "service_name": self.swarm_service_name,
             "stack_name": self.stack_name,
-            "unit_name": self.unit_name,
+            "target_name": self.unit_name,   # unit_name will internally be renamed to target_name in the future 
             "container": self.unit_name, # legacy template field   
             "docker_image": self.image,
             
@@ -233,7 +236,7 @@ class NotificationContext:
             "action_type": self.action_type,
             "action_string": self.action_string,
             "action_target": self.action_target,
-            "action_result": self.action_result,
+            "action_result_message": self.action_result,
             "action_succeeded": self.action_succeeded,
         }
 

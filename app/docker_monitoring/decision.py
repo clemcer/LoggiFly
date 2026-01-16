@@ -175,7 +175,7 @@ class MonitorDecision:
                 MonitorType.SWARM,
                 parse_label_config(labels)
             )
-            if unit_config is None:
+            if not unit_config:
                 logger.error(
                     f"Could not validate swarm service config for '{service_name}' from {label_source}.\n"
                     f"Labels: {labels}"
@@ -275,7 +275,7 @@ class MonitorDecision:
                 MonitorType.CONTAINER,
                 parse_label_config(snapshot.labels)
             )
-            if unit_config is None:
+            if not unit_config:
                 logger.error(
                     f"Could not validate container config for '{cname}' from labels.\n"
                     f"Labels: {snapshot.labels}"

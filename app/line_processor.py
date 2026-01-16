@@ -253,21 +253,6 @@ class LogProcessor:
         self.log_stream_last_updated = time.time()
         self.new_line_event.set()
 
-    def _cooldown_is_expired(self, key: str | tuple[str, ...], notification_cooldown: int, ignore_keyword_time: bool = False) -> bool:
-        """check if the keyword is on cooldown"""
-        if ignore_keyword_time:
-            return True
-        with self.kw_time_lock:
-            if time.time() - self.time_per_keyword.get(key, 0) >= int(notification_cooldown):
-                return True
-            else:
-                return False
-
-    def _set_keyword_time(self, key: str | tuple[str, ...]):
-        """set the keyword time"""
-        with self.kw_time_lock:
-            self.time_per_keyword[key] = time.time()
-
 
     def _search_keyword(self, log_line: str, keyword_dict: dict, ignore_keyword_time: bool = False) -> str | tuple | None:
         """
@@ -282,25 +267,40 @@ class LogProcessor:
                 return self.unit_modular_settings[key]
             return default
 
+        def cooldown_is_expired(key: str | tuple[str, ...], notification_cooldown: int, ignore_keyword_time: bool = False) -> bool:
+            """check if the keyword is on cooldown"""
+            if ignore_keyword_time:
+                return True
+            with self.kw_time_lock:
+                if time.time() - self.time_per_keyword.get(key, 0) >= int(notification_cooldown):
+                    return True
+                else:
+                    return False
+
+        def set_keyword_time(key: str | tuple[str, ...]):
+            """set the keyword time"""
+            with self.kw_time_lock:
+                self.time_per_keyword[key] = time.time()
+
         notification_cooldown = get_keyword_setting("notification_cooldown", 10)
-        regex_case_sensitive = get_keyword_setting("regex_case_sensitive", True)
+        regex_case_sensitive = get_keyword_setting("regex_case_sensitive", False)
 
         if regex := keyword_dict.get("regex"):
-            if self._cooldown_is_expired(regex, notification_cooldown, ignore_keyword_time):
+            if cooldown_is_expired(regex, notification_cooldown, ignore_keyword_time):
                 match = re.search(regex, log_line, re.IGNORECASE if not regex_case_sensitive else 0)
                 if match:
-                    self._set_keyword_time(regex)
+                    set_keyword_time(regex)
                     hide_pattern = get_keyword_setting("hide_regex_in_title", False)
                     return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
         elif keyword := keyword_dict.get("keyword"):
-            if self._cooldown_is_expired(keyword, notification_cooldown, ignore_keyword_time):
+            if cooldown_is_expired(keyword, notification_cooldown, ignore_keyword_time):
                 if keyword.lower() in log_line.lower():
-                    self._set_keyword_time(keyword)
+                    set_keyword_time(keyword)
                     return keyword
         elif keyword_group := keyword_dict.get("keyword_group"):
-            if self._cooldown_is_expired(keyword_group, notification_cooldown, ignore_keyword_time):
+            if cooldown_is_expired(keyword_group, notification_cooldown, ignore_keyword_time):
                 if all(keyword.lower() in log_line.lower() for keyword in keyword_group):
-                    self._set_keyword_time(keyword_group)
+                    set_keyword_time(keyword_group)
                     return keyword_group
         else:
             self.logger.error(f"No keyword or regex found for {keyword_dict}")
@@ -337,7 +337,6 @@ class LogProcessor:
                     + (f" (A Log FIle will be attached)" if merged_modular_settings.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )
-        self.logger.debug(f"Keyword level config: {keyword_level_config}")
         
         notification_context = NotificationContext(
             notification_type=NotificationType.LOG_MATCH,
@@ -359,17 +358,6 @@ class LogProcessor:
             unit_context=self.unit_context,
             notification_context=notification_context,
         )
-
-    def _log_attachment(self, number_attachment_lines):
-        """Create a log file attachment with the specified number of lines."""
-        file_name = f"last_{number_attachment_lines}_lines_from_{self.unit_name}.log"
-        try:
-            log_tail = self._tail_logs(lines=number_attachment_lines)
-            if log_tail:
-                return log_tail, file_name
-        except Exception as e:
-            self.logger.error(f"Could not create log attachment file for Container {self.unit_name}: {e}")
-            return None, None
 
     def _tail_logs(self, lines=100):
         """Tail logs from the container. Calls the tail_logs method of the monitor instance."""

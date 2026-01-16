@@ -99,35 +99,35 @@ MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS = {
 }
 
 SUPPORTED_CONTAINER_ACTIONS: tuple[str, ...] = tuple(action.value for action in Actions)
-SUPPORTED_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
+SUPPORTED_CONTAINER_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
 
 
 MAP_EVENT_TO_TITLE = {
-    "start":    "Container '{unit_name}' started",
-    "stop":     "Container '{unit_name}' stopped (requested)",
-    "die":      "Container '{unit_name}' exited",
-    "crash":    "Container '{unit_name}' crashed",
-    "destroy":  "Container '{unit_name}' removed",
-    "healthy":  "Container '{unit_name}' is healthy",
-    "unhealthy":"Container '{unit_name}' is unhealthy",
-    "starting": "Container '{unit_name}' is starting",
-    "oom":      "OOM event for container '{unit_name}' (Out of Memory)",
-    "kill":     "Container '{unit_name}' was killed",
-    "create":   "Container '{unit_name}' was created",
-    "restart":  "Container '{unit_name}' was restarted",
+    "start":    "Container '{target_name}' started",
+    "stop":     "Container '{target_name}' stopped",
+    "die":      "Container '{target_name}' exited",
+    "crash":    "Container '{target_name}' crashed",
+    "destroy":  "Container '{target_name}' removed",
+    "healthy":  "Container '{target_name}' is healthy",
+    "unhealthy":"Container '{target_name}' is unhealthy",
+    "starting": "Container '{target_name}' is starting",
+    "oom":      "OOM event for container '{target_name}'",
+    "kill":     "Container '{target_name}' was killed",
+    "create":   "Container '{target_name}' was created",
+    "restart":  "Container '{target_name}' was restarted",
 }
 
 MAP_EVENT_TO_MESSAGE = {
-    "start":     "Container '{unit_name}' was started.",
-    "stop":      "Container '{unit_name}' was stopped by a stop request.",
-    "die":       "Container '{unit_name}' exited. Exit code: {exit_code}.",
-    "crash":     "Container '{unit_name}' exited unexpectedly. Exit code: {exit_code}.",
-    "destroy":   "Container '{unit_name}' was removed.",
-    "healthy":   "Health status for container '{unit_name}' changed to healthy.",
-    "unhealthy": "Health status for container '{unit_name}' changed to unhealthy.",
-    "starting":  "Health status for container '{unit_name}' changed to starting.",
-    "oom":       "Container '{unit_name}' ran out of memory (OOM).",
-    "kill":      "Container '{unit_name}' was killed (signal: {signal}).",
-    "create":    "Container '{unit_name}' was created.",
-    "restart":   "Container '{unit_name}' was restarted.",
+    "start":     "Container '{target_name}' was started.",
+    "stop":      "Container '{target_name}' was stopped by a stop request.",
+    "die":       "Container '{target_name}' exited. Exit code: {exit_code}.",
+    "crash":     "Container '{target_name}' exited unexpectedly. Exit code: {exit_code}.",
+    "destroy":   "Container '{target_name}' was removed.",
+    "healthy":   "Health status for container '{target_name}' changed to healthy.",
+    "unhealthy": "Health status for container '{target_name}' changed to unhealthy.",
+    "starting":  "Health status for container '{target_name}' changed to starting.",
+    "oom":       "Container '{target_name}' ran out of memory (OOM).",
+    "kill":      "Container '{target_name}' was killed (signal: {signal}).",
+    "create":    "Container '{target_name}' was created.",
+    "restart":   "Container '{target_name}' was restarted.",
 }

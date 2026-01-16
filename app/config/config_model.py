@@ -8,7 +8,7 @@ from pydantic import (
 )
 from typing import Literal
 from enum import Enum
-from constants import SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_EVENTS
+from constants import SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_CONTAINER_EVENTS
 from typing import List, Optional, Union, ClassVar, Annotated, Any
 import logging
 import re
@@ -271,7 +271,7 @@ class KeywordBase(BaseModel):
 
 
 class ContainerEventConfig(ModularSettings):
-    event: Literal[*SUPPORTED_EVENTS] # type: ignore
+    event: Literal[*SUPPORTED_CONTAINER_EVENTS] # type: ignore
     action: Optional[str] = None
     olivetin_actions: Optional[List[OliveTinAction]] = None
 
@@ -298,18 +298,18 @@ class ContainerEventBase(BaseConfigModel):
             converted = []
             for item in data["container_events"]:
                 if isinstance(item, str):
-                    if item.strip() not in SUPPORTED_EVENTS:
-                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                    if item.strip() not in SUPPORTED_CONTAINER_EVENTS:
+                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                         continue
                     converted.append({
                         "event": item.strip(),
                     })
                 elif isinstance(item, dict):
                     if not item.get("event"):
-                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                         continue
-                    if item["event"] not in SUPPORTED_EVENTS:
-                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item['event']}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+                    if item["event"] not in SUPPORTED_CONTAINER_EVENTS:
+                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item['event']}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                         continue
                     for key in item.keys():
                         if key == "action":
@@ -597,8 +597,8 @@ def validate_container_events(v):
             if not isinstance(event, dict) or "event" not in event:
                 logging.warning(f"Ignoring Error in config in field 'container_events': '{event}' is not a dict or does not have an 'event' key.")
                 continue
-            if event["event"] not in SUPPORTED_EVENTS:
-                logging.warning(f"Ignoring Error in config in field 'container_events': '{event['event']}' is not a valid event. Valid events are: {SUPPORTED_EVENTS}")
+            if event["event"] not in SUPPORTED_CONTAINER_EVENTS:
+                logging.warning(f"Ignoring Error in config in field 'container_events': '{event['event']}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                 continue
             converted.append(event)
     else:
@@ -630,9 +630,6 @@ def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
             continue
         if action_type in ["http", "view"] and not raw.get("url"):
             logging.warning(f"Ntfy Action: url is required for action '{raw['action']}'. Ignoring action '{raw}'.")
-            continue
-        if action_type == "broadcast" and not raw.get("intent"):
-            logging.warning(f"Ntfy Action: intent is required for action '{raw['action']}'. Ignoring action '{raw}'.")
             continue
         if len(filtered_actions) >= 3:
             logging.warning(f"Ntfy Action: You can only have up to 3 actions. Ignoring additional actions: {actions[idx-1:]}")

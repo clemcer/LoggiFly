@@ -101,7 +101,6 @@ def build_ntfy_action_header(actions: list) -> str:
             if a.get('clear') is True:
                 parts.append("clear=true")
             action_list.append(", ".join(parts))
-    logger.debug(f"ACTIONS: {actions}")
     header = ";".join(action_list) if actions else ""
     return header
 
@@ -207,7 +206,6 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
 
     if ntfy_config.get('actions'):
         action_header = build_ntfy_action_header(ntfy_config.get('actions', []))
-        logger.debug(f"ACTION HEADER: {action_header}")
         headers["Actions"] = action_header
     if ntfy_config.get("tags"):
         headers["Tags"] = ntfy_config.get("tags")
@@ -265,7 +263,6 @@ def send_webhook(json_data: dict, webhook_config: dict):
         )
         if response.status_code == 200:
             logger.info(f"Webhook sent successfully.")
-            # logger.debug(f"Webhook Response: {json.dumps(response.json(), indent=2)}")
         else:
             logger.error("Error while trying to send POST request to custom webhook: %s", response.text)
     except requests.RequestException as e:
@@ -314,6 +311,5 @@ def send_notification(config: GlobalConfig,
                 "title": title,
                 "message": message,
             }
-        logger.debug(f"JSON DATA: {json_data}")
         send_webhook(json_data, webhook_config)
 
