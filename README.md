@@ -34,7 +34,7 @@ Get instant alerts for security breaches, system errors, or custom patterns thro
 ---
 
 
-# 🚀 Features
+# Features
 
 - **🔍 Plain Text, Regex & Multi-Line Log Detection**: Catch simple keywords or complex patterns in log entries that span multiple lines.
 - **🚨 Ntfy/Apprise Alerts**: Send notifications directly to Ntfy or via Apprise to 100+ different services (Slack, Discord, Telegram) or even to your own custom endpoint.
@@ -47,7 +47,7 @@ Get instant alerts for security breaches, system errors, or custom patterns thro
 
 
 ---
-# 🖼 Screenshots
+# Screenshots
 
 <div style="display: flex; justify-content: center; gap: 10px; align-items: center;">
   <img src="/docs/public/collage.png" alt="collage of screenshots" object-fit: contain;">
@@ -55,7 +55,7 @@ Get instant alerts for security breaches, system errors, or custom patterns thro
 
 <br>
 
-### 🎯 Customize notifications and filter log lines for relevant information:
+### Customize notifications and filter log lines for relevant information:
 
 <div style="display: flex; justify-content: center; gap: 10px; align-items: center;">
   <img src="/docs/public/template_collage.png" alt="Custom Tepmplates Collage" object-fit: contain;">

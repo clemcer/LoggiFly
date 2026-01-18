@@ -62,8 +62,8 @@ Except for container / keyword specific settings and regex patterns a lot of the
 | `ATTACHMENT_LINES`              | Define the number of Log Lines in the attachment file     | 20     |
 | `NOTIFICATION_COOLDOWN`         | Cooldown period (in seconds) per container per keyword before a new message can be sent  | 5        | 
 | `ACTION_COOLDOWN`         | Cooldown period (in seconds) before the next container action can be performed. Always at least 10s. (`action_keywords` are only configurable in YAML)  | 300        |
-| `TITLE_TEMPLATE`         | Template for the notification title (see [customize-notifications](./customize-notifications)) | _N/A_        |
-| `MESSAGE_TEMPLATE`         | Template for the notification message (see [customize-notifications](./customize-notifications)) | _N/A_        |
+| `TITLE_TEMPLATE`         | Template for the notification title (see [customize-notifications](./customize-notifications/)) | _N/A_        |
+| `MESSAGE_TEMPLATE`         | Template for the notification message (see [customize-notifications](./customize-notifications/)) | _N/A_        |
 | `HIDE_REGEX_IN_TITLE`         | Exclude regex from the found keywords in the notification title for a cleaner look. Useful when using very long regexes.| False     |
 | `REGEX_CASE_SENSITIVE`         | Case sensitive regex matching. | False     |
 | `OLIVETIN_URL`         | URL of your OliveTin instance. | _N/A_        |
