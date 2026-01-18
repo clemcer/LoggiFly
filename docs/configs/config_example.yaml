@@ -104,14 +104,20 @@ containers:
     ntfy_topic: server
     ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/immich.png
     ntfy_markdown: true
-    # the message_template and link inside it are formatted as markdown for the ntfy notification
-    message_template: |
-      🔎 [Link to Dozzle](http://192.168.178.222:8888/container/{container_id}) 
     container_events:
-      - event: crash
-        title_template: '{container_name} crashed with exit code {exit_code}'
-      - event: oom
-        title_template: 'Immich Machine learning container ran out of memory'
+      - event: oom 
+        attach_logfile: true
+        ntfy_tags: robot,rotating_light
+      - event: crash 
+        ntfy_tags: robot,rotating_light
+        action: restart
+        action_cooldown: 10
+        title_template: 'Immich Machine Learning Container crashed (exit code: {exit_code})'
+        # link inside message_template is formatted as markdown for the ntfy notification because of ntfy_markdown: true
+        message_template: |
+          🔁 {action_result_message}
+          🔎 [Link to Dozzle](http://192.168.178.222:8080/container/{container_id})
+
 
   grafana:
     ntfy_tags: closed_lock_with_key
