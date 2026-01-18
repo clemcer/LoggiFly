@@ -14,10 +14,9 @@ When the connection to a docker host is lost, LoggiFly will try to reconnect eve
 :::
 
 ## Labels 
-When multiple hosts are set LoggiFly will use **labels** to differentiate between them both in notifications and in logging.<br>
+When multiple hosts are set LoggiFly will use the hostname or **labels** to differentiate between them both in notifications and in logging.<br>
 You can set a **label** by appending it to the address with `"|"` ([_see example_](#remote-hosts-example)).<br>
-When no label is set LoggiFly will use the **hostname** retrieved via the docker daemon. If that fails, usually because `INFO=1` has to be set when using a proxy, the labels will just be `Host-{Nr}`.<br>
-Note that labels and hostnames are only being used when there is more than one host being monitored.
+When no label is set LoggiFly will use the **hostname** retrieved via the docker daemon.
 
 ::: tip
 If you want to set a label to your _mounted docker socket_ you can do so by adding `unix:///var/run/docker.sock|label` in the `DOCKER_HOST` environment variable (_the socket still has to be mounted_) or just set the address of a [socket proxy](#socket-proxy) with a label.

@@ -1,0 +1,28 @@
+services:
+  loggifly:
+    image: ghcr.io/clemcer/loggifly:latest
+    container_name: loggifly
+    # It is recommended to set the user so that the container does not run as root
+    user: 1000:1000
+    read_only: true
+    volumes:
+      - socket-proxy:/var/run
+      # Place your config.yaml here if you are using one
+      - ./config:/config
+    depends_on:
+      - socket-proxy
+    restart: unless-stopped 
+
+  socket-proxy:
+    image: "11notes/socket-proxy:2"
+    read_only: true
+    # Make sure to use the same UID/GID as the owner of your docker socket. 
+    # You can check with: `ls -n /var/run/docker.sock`
+    user: "0:996"
+    volumes:
+      - "/run/docker.sock:/run/docker.sock:ro"
+      - "socket-proxy:/run/proxy"
+    restart: "always"
+
+volumes: 
+  socket-proxy:

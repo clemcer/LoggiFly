@@ -1,0 +1,12 @@
+services:
+  loggifly:
+    image: ghcr.io/clemcer/loggifly:latest
+    container_name: loggifly
+    read_only: true
+    environment:
+      # Configure Environment Variables here if you don't want to use a config.yaml file
+      TZ: Europe/Berlin
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config:/config    # Place your config.yaml file in this directory
+    restart: unless-stopped 

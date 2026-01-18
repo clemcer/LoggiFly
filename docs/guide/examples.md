@@ -4,7 +4,7 @@ title: Examples
 
 # Examples 
 
-## 📝 Config Example
+## Config Example
 
 Here is an example config with some real use cases. 
 ::: details Config Example with Use Cases
@@ -17,7 +17,7 @@ Here is an example config with some real use cases.
 Feel free to contribute your use cases to [the file](https://github.com/clemcer/loggifly/blob/main/docs/configs/config_example.yaml).
 :::
 
-## 🔍 Systemd Monitoring
+## Systemd Monitoring
 
 You can monitor systemd services / journal logs with LoggiFly by setting up a fluentbit container.
 
@@ -49,8 +49,8 @@ containers:
           - ssh
           - failed
           - password
-        notification_title: 'Failed SSH Login Attempt'
-        json_template: '{MESSAGE}'
+        title_template: 'Failed SSH Login Attempt'
+        message_template: '{MESSAGE}' # this is a field available in the JSON log entry
         notification_cooldown: 0
         ntfy_tag: rotating_light
 

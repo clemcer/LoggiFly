@@ -4,7 +4,7 @@ title: Docker Swarm
 
 # Docker Swarm
 
-LoggiFly does not monitor Swarm services directly, since the Swarm API is limited and does not integrate well with LoggiFly. Instead, it monitors the individual containers that belong to a configured Swarm service by recognizing the service name from Docker Swarm labels.
+LoggiFly does not monitor Swarm services directly, since the Swarm API is limited. Instead, it monitors the individual containers that belong to a configured Swarm service by recognizing the service name from the Docker Swarm labels.
 
 This means that for LoggiFly to reliably monitor swarm services it has to be deployed as a global service on every node in the swarm cluster.
 
@@ -47,7 +47,7 @@ services:
 
 configs:
   loggifly-config:
-    file: ./loggifly/config.yaml  # SET THE PATH TO YOUR CONFIG.YAML HERE
+    file: ./config.yaml  # SET THE PATH TO YOUR CONFIG.YAML HERE
 
 ```
 
@@ -73,8 +73,7 @@ swarm_services:
   my_service: # includes my_service_nginx and my_service_redis
     keywords:
       - error
-    keywords_with_attachment:
-      - fatal
+      - regex: \timeout\b.* 
 ```
 
 The `swarm_services` configuration is identical to that of `containers`, so for all available configuration options, refer to the [Containers section](./config_sections/containers) or the [Settings Overview](./settings-overview). 

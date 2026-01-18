@@ -1,115 +1,329 @@
 # ===========================================
-#                CONFIG TEMPLATE
+#        COMPREHENSIVE CONFIG TEMPLATE
 # ===========================================
 #
-# This is a template for your config.yaml file.
+# This template is for reference showing ALL available configuration options.
 #
-# Remove any sections you don't need.
-# After editing, rename this file to config.yaml to use it.
+# Configuration Priority: Per-Trigger > Per-Container > Global
 #
-# For LoggiFly to work, you need to:
-#   - Configure at least ONE container
-#   - Add at least ONE keyword/regex (globally or per container)
-#
-# Each container example below shows more configuration options.
-#
-# For more configuration options like OliveTin actions or notification customization, 
+# For advanced features like Swarm Services and Multi-Host monitoring,
 # visit the docs: https://clemcer.github.io/loggifly
 #
 # ===========================================
 
+# ============================================================================
+# SECTION 1: CONTAINERS - Define which containers to monitor
+# ============================================================================
 containers:
 
-  container1: # (Example) Leave blank if you only need global keywords
+  # Example 1: Empty container - monitors using only global_keywords
+  nginx:
 
-  container2:
+  # Example 2: keywords, regex and keyword groups
+  database:
     keywords:
-      - keyword1                 # Simple keyword
-      - regex: regex-pattern1    # Use this for regex patterns
-      - keyword: keyword2        # Another way to set a simple keyword
-      - keyword_group:           # When all of these keywords are found in a log line, a notification is sent
-        - keyword3
-        - keyword4
-        - keyword5
+      - error                           # Simple keyword
+      - warning                         # Another simple keyword
+      - regex: (timeout|deadlock)       # Regex pattern
+      - keyword: critical               # Alternative keyword syntax
+      - keyword_group:                  # Triggers only when all 3 appear together
+          - authentication
+          - failed
+          - user                        
 
-  container3:
+  # Example 3: Comprehensive per-container & per-trigger settings
+  # Most settings can be defined at container and trigger level to override global defaults
+  web-app:
+    # Notification channel overrides
+    ntfy_topic: web-app-alerts
+    ntfy_priority: 4
+    ntfy_tags: warning,globe_with_meridians
+    apprise_url: "discord://custom-webhook-id/token"
+
+    # Notification behavior
+    notification_cooldown: 10           # Seconds between repeated alerts for same keyword
+    attach_logfile: true                # Attach log file to notifications
+    attachment_lines: 50                # Number of log lines to include
+    hide_regex_in_title: true           # Don't show full regex pattern in found keywords in notification titles for cleaner look
+
+    # Custom templates
+    title_template: '{container_name}: {keywords} detected'
+    message_template: |
+      Container: {container_name}
+      Keywords: {keywords}
+      Time: {datetime}
+      Log: {log_entry}
+
+    # Action settings
+    action_cooldown: 120                # Cooldown before next container action (min: 10s)
+
+    # Each keyword/regex can have its own settings that override container and global settings
     keywords:
-      - keyword: keyword1
-        attach_logfile: true    # Attach a log file to the notification
-      - regex: regex-pattern1
-        action: restart          # Restart container on this regex match
-      - keyword: keyword2
-        action: stop             # Stop container on this keyword
-
-  # You can set many settings per container or per keyword!
-  # See all options: https://clemcer.github.io/loggifly/guide/settings-overview
-  container4:
-    apprise_url: "discord://webhook-url"
-    ntfy_tags: closed_lock_with_key
-    ntfy_priority: 5
-    ntfy_topic: container3
-    attachment_lines: 50
-    notification_title: '{keywords} found in {container}'
-    notification_cooldown: 2
-    attach_logfile: true
-    action_cooldown: 60
-    hide_regex_in_title: true
-
-    keywords:
-      - keyword1
-      - keyword2
-
-      - regex: regex-pattern1
-        ntfy_tags: closed_lock_with_key
-        ntfy_priority: 5
-        ntfy_topic: regex-pattern1
-        attachment_lines: 10
-        hide_regex_in_title: false
-
-      - keyword: keyword3
-        apprise_url: "discord://another-webhook-url"
-        action: restart
-        action_cooldown: 60
-        notification_title: 'custom title'
-        notification_cooldown: 10
+      - keyword: error
+        ntfy_topic: error-channel            # Override topic for this keyword
+        ntfy_priority: urgent           # urgent = priority 5
+        ntfy_tags: warning
+        notification_cooldown: 0        # Alert immediately every time
         attach_logfile: true
+        attachment_lines: 100
 
-# Global keywords apply to ALL containers
+      - regex: 'process (?P<process_id>\w+) failed'
+        title_template: 'Process {process_id} failed'
+        message_template: 'Process ID: {process_id}\nTime: {datetime}\nLog: {log_entry}'
+        action: restart                 # Restart this container on this keyword
+        action_cooldown: 60            # Wait 1 minute before next restart
+
+  # Example 4: Container events monitoring
+  # Monitor Docker container lifecycle events
+  redis:
+    container_events:
+      - event: crash                    # Container exits with non-zero code
+        action: restart
+        notification_cooldown: 0
+        ntfy_priority: 5
+        title_template: '{container_name} crashed with exit code {exit_code}'
+
+      - event: oom                      # Out of memory kill
+        ntfy_priority: urgent
+        ntfy_tags: skull,warning
+        title_template: '{container_name} ran out of memory!'
+
+      - event: unhealthy                # Health check failed
+        ntfy_priority: high
+        title_template: '{container_name} is unhealthy'
+      
+      - event: die                      # Container exits
+        ntfy_priority: default
+        disable_notifications: false
+
+  # Example 5: Container actions
+  # Trigger actions on the monitored container or other containers
+  app-monitor:
+    keywords:
+      - keyword: critical_system_error
+        action: stop                    # Stop this container (app-monitor)
+      - keyword: database_connection_lost
+        action: restart@database        # Restart the 'database' container
+
+      - keyword: cache_corrupted
+        action: stop@redis              # Stop the 'redis' container
+
+  # Example 6: OliveTin integration
+  # Trigger OliveTin actions when keywords are detected
+  backup-service:
+    keywords:
+      - keyword: backup_completed
+        olivetin_action_id: "notify-admin"  # Simple action without arguments
+
+      - keyword: backup_failed
+        olivetin_actions:               # Multiple actions with arguments
+          - id: "restart-backup"
+            arguments:
+              - name: backup_type
+                value: "full"
+              - name: retry_count
+                value: "3"
+          - id: "send-alert"
+            arguments:
+              - name: severity
+                value: "high"
+              - name: message
+                value: "Backup failed, check logs"
+
+  # Example 7: Advanced ntfy features
+  # Show all ntfy notification options including actions and click URLs
+  monitoring-service:
+    keywords:
+      - keyword: deployment_ready
+        ntfy_priority: 4
+        ntfy_tags: rocket,check
+        ntfy_icon: "https://example.com/icon.png"
+        ntfy_click: "https://dashboard.example.com/deployments"
+        ntfy_markdown: true
+        ntfy_actions:
+          - action: "view"             # Open URL in browser
+            label: "View Dashboard"
+            url: "https://dashboard.example.com"
+            clear: true                # Clear notification after clicking
+
+          - action: "http"             # Send HTTP request
+            label: "Approve Deploy"
+            url: "https://api.example.com/approve"
+            method: "POST"
+            headers:
+              Authorization: "Bearer secret-token"
+            body: '{"deployment_id": "12345"}'
+            clear: false
+
+          - action: "broadcast"        # Android broadcast 
+            label: "Broadcast"
+            intent: "com.example.ACTION"
+            extras:
+              key1: "value1"
+              key2: "value2"
+            clear: false
+
+  # Example 8: Webhook notifications
+  # Send notifications to custom webhook endpoints
+  security-monitor:
+    keywords:
+      - keyword: failed_login
+        webhook_url: "https://custom-webhook.example.com/alerts"
+        webhook_headers:
+          Authorization: "Bearer custom-token"
+          X-Alert-Type: "security"
+          X-Severity: "high"
+        apprise_url: "discord://webhook-id/token"  # Can use multiple channels
+        ntfy_topic: security
+
+  # Example 9: Disable notifications but keep actions
+  health-checker:
+    keywords:
+      - keyword: service_down
+        disable_notifications: true     # No notification sent
+        action: restart                 # But action is still triggered
+
+# ============================================================================
+# SECTION 2: GLOBAL KEYWORDS - Keywords that apply to ALL containers
+# ============================================================================
 global_keywords:
   keywords:
-    - global_keyword1
-    - regex: regex1
+    - panic                             # Critical system panic
+    - fatal                             # Fatal errors
+    - regex: out of memory              # Memory issues
       attach_logfile: true
+      attachment_lines: 100
+      ntfy_priority: 5
 
+    - keyword: segmentation fault       # Segfaults
+      ntfy_priority: urgent
+      ntfy_tags: skull,warning
+
+# ============================================================================
+# SECTION 3: NOTIFICATIONS - Configure notification channels
+# ============================================================================
 notifications:
-  # At least one of these (Ntfy/Apprise/Webhook) is required.
+  # ========== NTFY ==========
+  # Self-hosted or public ntfy.sh service
   ntfy:
-    url: http://your-ntfy-server      # Required: Ntfy instance URL
-    topic: loggifly                   # Required: Ntfy topic
-    token: ntfy-token                 # Optional: Ntfy token for auth
-    username: john                    # Optional: Username for auth
-    password: password                # Optional: Password for auth
-    priority: 3                       # Ntfy priority (1-5)
-    tags: kite,mag                    # Ntfy tags/emojis
+    # Connection settings (required)
+    url: http://your-ntfy-server       # URL of your ntfy instance
+    topic: loggifly                     # Topic name for notifications
+
+    # Authentication (optional - choose one method)
+    token: ntfy-token                   # Option 1: Token-based auth
+    # OR use username/password:
+    username: john                      # Option 2: Username
+    password: password                  # Option 2: Password
+
+    # Message customization (optional)
+    priority: 3                         # Priority: 1-5 or min/low/default/high/max/urgent
+    tags: kite,mag                      # Comma-separated emoji tags (see ntfy.sh/docs/emojis)
+    icon: https://example.com/icon.png  # Custom icon URL
+    click: https://example.com          # URL to open when notification clicked
+    markdown: true                      # Enable markdown formatting in messages
+
+    # Default action buttons (optional, max 3)
+    # These appear on all notifications unless overridden per-container/trigger
+    actions:
+      - action: "view"
+        label: "View Logs"
+        url: "https://logs.example.com"
+        clear: true                     # Clear notification after clicking
+
+      - action: "http"
+        label: "Acknowledge"
+        url: "https://api.example.com/ack"
+        method: "POST"
+        headers:
+          Authorization: "Bearer token"
+        body: '{"acknowledged": true}'
+        clear: false
+
+      - action: "broadcast"             # Android only
+        label: "Broadcast Event"
+        intent: "com.example.ALERT"
+        extras:
+          alert_type: "container"
+        clear: false
+
+    # Custom HTTP headers (optional)
+    headers:
+      At: "tomorrow, 10am"              # header using ntfy delay feature. send the notification at 10am tomorrow
+      X-Custom-Header: "custom-value"
+
+  # ========== APPRISE ==========
+  # Unified notification service supporting 100+ platforms
+  # See: https://github.com/caronc/apprise/wiki
   apprise:
-    url: "discord://webhook-url"      # Any Apprise-compatible URL
+    url: "discord://webhook-id/webhook-token"  # Any Apprise-compatible URL
 
-#  Default settings (can be overridden on container or keyword level)
-settings:          
-  log_level: INFO                        # DEBUG, INFO, WARNING, ERROR
-  multi_line_entries: True               # Catch log entries that span multiple lines instead of going line by line.
-  reload_config: True                     # Auto-reload config on changes
-  disable_start_message: False            # Suppress startup notification
-  disable_shutdown_message: False         # Suppress shutdown snotification
-  disable_config_reload_message: False    # Suppress config reload notification
-  disable_container_event_message: False  # Suppress container start/stop notifications
+  # ========== WEBHOOK ==========
+  # Send notifications to custom webhook endpoint
+  webhook:
+    url: "https://webhook.example.com/endpoint"
+    headers:
+      Authorization: "Bearer secret-token"
+      Content-Type: "application/json"
+      X-Custom-Header: "value"
 
-  # The following settings can also be set per container or per keyword/regex pattern
-  notification_cooldown: 5            # Seconds between alerts for same keyword (per container)
-  notification_title: default         # Custom template for notification title
-  action_cooldown: 300                # Cooldown (seconds) before next container action (min 60s)
-  attach_logfile: False               # Attach log file to all notifications
-  attachment_lines: 20                # Lines to include in log attachments
-  hide_regex_in_title: False          # Hide regex in notification title
-  excluded_keywords:                  # List of keywords that will always be ignored in log lines. (https://clemcer.github.io/loggifly/guide/config_sections/settings.html#excluded-keywords). 
+# ============================================================================
+# SECTION 4: SETTINGS - Global settings and defaults
+# ============================================================================
+# All settings have default values, so this section is optional.
+settings:
 
+  # ========== SYSTEM SETTINGS ==========
+  log_level: INFO                       # Logging level: DEBUG, INFO, WARNING, ERROR
+  multi_line_entries: true              # Detect and combine multi-line log entries
+  reload_config: true                   # Auto-reload config.yaml on changes
+
+  # ========== SYSTEM NOTIFICATIONS ==========
+  disable_start_message: false          # Suppress startup notification
+  disable_shutdown_message: false       # Suppress shutdown notification
+  disable_config_reload_message: false  # Suppress config reload notification
+  disable_monitor_event_message: false  # Suppress container monitoring start/stop notifications
+  compact_summary_message: false        # Format summary as comma-separated list instead of multi-line
+
+  # ========== MONITOR ALL ==========
+  monitor_all_containers: false         # Monitor all containers on the Docker host
+  excluded_containers:                  # Containers to exclude when monitor_all is enabled
+    - temp-container
+    - test-container
+  monitor_all_swarm_services: false     # Monitor all Docker Swarm services
+  excluded_swarm_services:              # Services/stacks to exclude when monitor_all is enabled
+    - test-service
+    - dev-stack
+
+  # ========== MODULAR SETTINGS ==========
+  # All settings below can be overridden per-container or per-trigger
+
+  notification_cooldown: 5              # Seconds between repeated alerts for same keyword per container
+  disable_notifications: false          # Disable all notifications (useful for action-only workflows)
+  attach_logfile: false                 # Attach log file to notifications
+  attachment_lines: 20                  # Number of log lines to include in attachments
+  hide_regex_in_title: false            # Don't show full regex pattern in notification titles for cleaner look
+  action_cooldown: 300                  # Cooldown (seconds) before next container action (minimum: 10s)
+
+  # Custom notification templates
+  # Available template fields: https://clemcer.github.io/loggifly/guide/customize-notifications/#template-fields
+  title_template: "{container}: {keywords}"
+  message_template: |
+    Container: {container_name}
+    Keywords: {keywords}
+    Time: {datetime}
+
+    {log_entry}
+
+  # Keywords/patterns to always ignore globally
+  excluded_keywords:
+    - debug
+    - trace
+    - keyword: verbose
+    - regex: ^\[INFO\].*routine
+
+  # Configure OliveTin for triggering actions via web UI
+  # See: https://clemcer.github.io/loggifly/guide/olivetin-integration
+  olivetin_url: http://olivetin:1337
+  olivetin_username: admin
+  olivetin_password: secret

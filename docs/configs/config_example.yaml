@@ -5,26 +5,33 @@
 #
 # This is an example config.yaml file for loggifly.
 #
-# If you want to use this file after editing it make sure to rename it to config.yaml
-#
 # Feel free to contribute to the containers section of this example config with use cases you have found helpful :)
 
 containers:        
   audiobookshelf:
     ntfy_topic: abs
     ntfy_tags: books, headphones
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/audiobookshelf.png
     notification_cooldown: 5
-    notification_title: "{container}" # hide found keywords from notification title
+    title_template: "{container_name}" # use container name as title
     keywords:
       # user requested download:
-      - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}).*User "(?P<user>[A-Za-z\s]+)" requested download for item "(?P<item>[A-Za-z\s]+)"'
-        template: '\n🔎 The user {user} requested download for  ''{item}''!\n🕐 {timestamp}'
+      - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}).*User "(?P<user>[a-zA-Z0-9._+-]+)" requested download for item "(?P<item>[A-Za-z\s]+)"'
+        message_template: |
+          🔎 The user {user} requested download for  '{item}'!
+          🕐 {timestamp}
       # user was online
-      - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}).*Socket.*disconnected from client "(?P<user>[A-Za-z\s]+)"'
-        template: '\n🔎 The user {user} was seen!\n🕐 {timestamp}'
+      - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}).*Socket.*disconnected from client "(?P<user>[a-zA-Z0-9._+-]+)"'
+        message_template: |
+          🔎 The user '{user}' was seen!
+          🕐 {timestamp}
       # Failed Login attempt
-      - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}).*Failed login attempt for username "(?P<user>[A-Za-z\s]+)" from ip (?P<ip_address>\d{1,3}(?:\.\d{1,3}){3})\s+\((?P<error>[A-Za-z\s]+)\)'
-        template: '🚨 Failed login!🙎‍♂️\nUsername: ''{user}''\n🔎 IP Address: {ip_address}\n🕐 {timestamp}'
+      - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}).*Failed login attempt for username "(?P<user>[a-zA-Z0-9._+-]+)" from ip (?P<ip_address>\d{1,3}(?:\.\d{1,3}){3})\s+\((?P<error>[A-Za-z\s]+)\)'
+        message_template: |
+          🚨 Failed login!
+          🙎‍♂️ Username: '{user}'
+          🔎 IP Address: {ip_address}
+          🕐 {timestamp}
 
       - podcast
       - regex: User.*logged in      # when a user logs in
@@ -35,58 +42,90 @@ containers:
     ntfy_tags: closed_lock_with_key   
     ntfy_priority: 5
     ntfy_topic: security
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/vaultwarden.png
     notification_cooldown: 0
     keywords:
         - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}).*Username or password is incorrect. Try again. IP: (?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}). Username: (?P<email>[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'
-          template: '🚨 Failed login!\n📧 Email: ''{email}''\n🔎 IP Address: {ip_address}\n🕐 {timestamp}'
-          hide_pattern_in_title: true # Hide full regex pattern in notification title
+          message_template: |
+            🚨 Failed login!
+            📧 Email: '{email}'
+            🔎 IP Address: {ip_address}
+            🕐 {timestamp}
+          title_template: 'Failed Vaultwarden login'
+          ntfy_tags: rotating_light
 
   paperless-webserver:
-    ntfy_tags: closed_lock_with_key
     ntfy_priority: 5
     ntfy_topic: security
-    notification_title: 'Failed Paperless-ngx login'
     notification_cooldown: 0
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/paperless-ngx.png
     keywords:
         - regex: '.*(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+).*Login failed for user `(?P<username>.*)` from IP `(?P<ip>.*)`'
-          template: '🚨 Failed login!\n📧 Username: ''{username}''\n🔎 IP Address: {ip}\n🕐 {timestamp}'
-          hide_pattern_in_title: true # Hide full regex pattern in notification title
+          message_template: |
+            🚨 Failed login!
+            📧 Username: '{username}'
+            🔎 IP Address: {ip}
+            🕐 {timestamp}
+          title_template: 'Failed Paperless-ngx login'
+          ntfy_tags: closed_lock_with_key,rotating_light
 
   homeassistant:
-    ntfy_tags: closed_lock_with_key
     ntfy_priority: 5
     ntfy_topic: security
-    notification_title: 'Failed Home Assistant login'
     notification_cooldown: 0
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/home-assistant.png
     keywords:
         - regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*Login attempt or request with invalid authentication from (?P<ip>.*)\. Requested URL.*'
-          template: '🚨 Failed login!\n🔎 IP Address: {ip}\n🕐 {timestamp}'
-          hide_pattern_in_title: true # Hide full regex pattern in notification title
+          message_template: |
+            🚨 Failed login!
+            🔎 IP Address: {ip}
+            🕐 {timestamp}
+          title_template: 'Failed Home Assistant login'
+          ntfy_tags: closed_lock_with_key,rotating_light
 
   immich_server:
-    ntfy_tags: closed_lock_with_key
+    ntfy_tags: camera_flash
     ntfy_priority: 5
     ntfy_topic: security
-    notification_title: 'Failed Immich login'
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/immich.png
     notification_cooldown: 0
     keywords:
         - regex: '.*(?P<timestamp>\d{2}\/\d{2}\/\d{4}, \d+:\d{2}:\d{2} (?:AM|PM)).*Failed login attempt for user (?P<username>.*) from ip address (?P<ip>.*)'
-          template: '🚨 Failed login!\n📧 Username: ''{username}''\n🔎 IP Address: {ip}\n🕐 {timestamp}'
-          hide_pattern_in_title: true # Hide full regex pattern in notification title
+          message_template: |
+            🚨 Failed login!
+            📧 Username: '{username}'
+            🔎 IP Address: {ip}
+            🕐 {timestamp}
+          title_template: 'Failed Immich login'
+          ntfy_tags: camera_flash,rotating_light
+  
+  immich_machine_learning:
+    ntfy_tags: camera_flash,robot
+    ntfy_topic: server
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/immich.png
+    ntfy_markdown: true
+    # the message_template and link inside it are formatted as markdown for the ntfy notification
+    message_template: |
+      🔎 [Link to Dozzle](http://192.168.178.222:8888/container/{container_id}) 
+    container_events:
+      - event: crash
+        title_template: '{container_name} crashed with exit code {exit_code}'
+      - event: oom
+        title_template: 'Immich Machine learning container ran out of memory'
 
   grafana:
     ntfy_tags: closed_lock_with_key
     ntfy_priority: 5
     ntfy_topic: security
-    notification_title: 'Failed Grafana login'
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/grafana.png
     notification_cooldown: 0
     keywords:
         - regex: '.*logger=authn\.service.*\[identity.not-found\]\s+(?P<msg>.*)'
-          template: '🚨 {msg}'
-          hide_pattern_in_title: true # Hide full regex pattern in notification title
+          message_template: '🚨 {msg}'
+          title_template: 'Failed Grafana login'
         - regex: '.*logger=authn\.service.*\[password-auth.failed\]\s+(?P<msg>.*)'
-          template: '🚨 {msg}'
-          hide_pattern_in_title: true # Hide full regex pattern in notification title
+          message_template: '🚨 {msg}'
+          title_template: 'Failed Grafana login'
 
   ebook2audiobook:
     attachment_lines: 300
@@ -97,27 +136,32 @@ containers:
       - keyword: total audio parts saved to        
         attach_logfile: true  # Attach a log file to the notification
 
+  # Authelia has JSON logs, so we can use the JSON template fields in out templates.
   authelia:
     ntfy_topic: security
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/authelia.png
     keywords:
       - regex: \bsuccessful.*authentication 
-        json_template: '{msg}\n🔎 IP: {remote_ip}\n{time}' 
+        title_template: "Successful Authelia login"
+        message_template: |
+          🔎 IP: {remote_ip}
+          🕐 {time}
+          {msg}
       - keyword: user not found
-        json_template: '🚨 Somebody tried to log in with a username that does not exist\n\n🕐{time}\nFull Error Message:\n{msg}'
+        title_template: "Failed Authelia login"
+        message_template: |
+          🚨 Somebody tried to log in with a username that does not exist
+          🕐 {time}
+          {msg}
 
   adguard:
     attach_logfile: true  # Attach a log file to the notification
     attachment_lines: 100
     ntfy_topic: adguard
+    ntfy_icon: https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/adguard-home-light.png
     keywords: 
       - failed
       - error
-
-  kitchenowl:
-    keywords:
-      - keyword: traceback
-        action: stop  # I have had container restart loops because kitchenowl couldn't connect to my Authentik Server
-
 
   fluentbit-kernel:
     #assuming output from
@@ -132,29 +176,29 @@ containers:
     keywords:
         - keyword_group:
             - "\"priority\":4"
-          json_template: "{msg}"
-          notification_title: 'Kernel warning'
+          message_template: "{msg}"
+          title_template: 'Kernel warning'
           ntfy_priority: 3
           ntfy_tags: warning
           
         - keyword_group:
             - "\"priority\":3"
-          json_template: "{msg}"
-          notification_title: 'Kernel error'
+          message_template: "{msg}"
+          title_template: 'Kernel error'
           ntfy_priority: 4
           ntfy_tags: exclamation
 
         - keyword_group:
             - "\"priority\":2"
-          json_template: "{msg}"
-          notification_title: 'Kernel critical error'
+          message_template: "{msg}"
+          title_template: 'Kernel critical error'
           ntfy_priority: 5
           ntfy_tags: skull
 
         - keyword_group:
             - "\"priority\":1"
-          json_template: "{msg}"
-          notification_title: 'Kernel alert'
+          message_template: "{msg}"
+          title_template: 'Kernel alert'
           ntfy_priority: 5
           ntfy_tags: skull
 
@@ -168,15 +212,15 @@ global_keywords:
 
 
 notifications:                     
-# At least one of these (Ntfy/Apprise/Webhook) is required.
+# At least one of these (ntfy/Apprise/Webhook) is required.
   ntfy:
-    url: http://your-ntfy-server    # Required. The URL of your Ntfy instance
-    topic: loggifly                 # Required. the topic for Ntfy
-    token: ntfy-token               # Ntfy token in case you need authentication 
-    username: john                  # Ntfy Username + Password in case you need authentication 
-    password: password              # Ntfy Username + Password in case you need authentication 
-    priority: 3                     # Ntfy priority (1-5)
-    tags: kite,mag                  # Ntfy tags/emojis 
+    url: http://your-ntfy-server    # Required. The URL of your ntfy instance
+    topic: loggifly                 # Required. the topic for ntfy
+    token: ntfy-token               # ntfy token in case you need authentication 
+    username: john                  # ntfy Username + Password in case you need authentication 
+    password: password              # ntfy Username + Password in case you need authentication 
+    priority: 3                     # ntfy priority (1-5)
+    tags: kite,mag                  # ntfy tags/emojis 
   apprise:
     url: "discord://webhook-url"    # Any Apprise-compatible URL (https://github.com/caronc/apprise/wiki)
   webhook: 
@@ -185,21 +229,11 @@ notifications:
       Authorization: "Bearer token"
       X-Custom-Header": "Test123"  
 
-#  Default settings (can be overridden on container or keyword level)
+# Since all settings have default values, we can only set the ones we want to change.
+# This is just an example of settings you might want to change. See the docs for all available settings.
 settings:
-  log_level: INFO                         # DEBUG, INFO, WARNING, ERROR
-  multi_line_entries: True                # Catch log entries that span multiple lines instead of going line by line.
-  reload_config: True                     # Auto-reload config on changes
-  disable_start_message: False            # Suppress startup notification
-  disable_shutdown_message: False         # Suppress shutdown notification
-  disable_config_reload_message: False    # Suppress config reload notification
-  disable_container_event_message: False  # Suppress container start/stop notifications
-
-  notification_cooldown: 5            # Seconds between alerts for same keyword (per container)
-  notification_title: default         # Custom template for notification title
-  action_cooldown: 300                # Cooldown (seconds) before next container action (min 60s)
-  attach_logfile: False               # Attach log file to all notifications
-  attachment_lines: 20                # Lines to include in log attachments
-  hide_regex_in_title: False          # Hide regex in notification title
-  excluded_keywords:                  # List of keywords that will always be ignored in log lines.
-    - keyword: ignore this message
+  disable_config_reload_message: True    # Suppress config reload notification
+  disable_monitor_event_message: True  # Suppress notifications when container monitoring starts/stops
+  notification_cooldown: 0            # Seconds between alerts for same keyword (per container)
+  action_cooldown: 60                # Cooldown (seconds) before next container action (min 60s)
+  hide_regex_in_title: True          # Hide full regex pattern in found keywords in notification title for cleaner look

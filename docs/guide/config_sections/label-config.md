@@ -15,7 +15,9 @@ Container-level settings are set via `loggifly.<setting>`.
 To provide a simple list of keywords, you can set `loggifly.keywords` to a comma-separated list of keywords. The same applies for `loggifly.excluded_keywords`.
 
 If you want to set keyword-level settings, you can do so by setting `loggifly.keywords.<index>.<setting>`. 
-So if you wanted to set a regex with a notification title, you can do so by setting `loggifly.keywords.1.regex: "some-regex"` and `loggifly.keywords.1.notification_title: "some-title"`.
+So if you wanted to set a regex with a `title_template`, you can do so by setting `loggifly.keywords.1.regex: "some-regex"` and `loggifly.keywords.1.title_template: "some-title"`.
+
+The same applies for container events. You can set `loggifly.container_events` to a comma-separated list of container events or add settings for a specific event by setting `loggifly.container_events.<index>.event: crash` and and`loggifly.container_events.<index>.<setting>: <some-value>`.
 
 ## Example
 
@@ -31,23 +33,31 @@ services:
       loggifly.ntfy_tags: "closed_lock_with_key"
       loggifly.ntfy_priority: "3"
       loggifly.attach_logfile: "true" # always attach the logfile to the notification for this container
+
+      # comma-separated lists for keywords and excluded keywords on container level
+      loggifly.keywords: "keyword1,keyword2,keyword3"
+      loggifly.excluded_keywords: "keyword4,keyword5,keyword6"
       
       # simple keyword with notification title
       loggifly.keywords.0: "critical" 
-      loggifly.keywords.0.notification_title: "{container}: Critical Alert"
+      loggifly.keywords.0.title_template: "{container}: Critical Alert"
       
-      # regex with ntfy tags and hide_regex_in_title
+      # regex with ntfy tags
       loggifly.keywords.1.regex: 'download.*failed' 
       loggifly.keywords.1.ntfy_tags: "partying_face"
-      loggifly.keywords.1.hide_regex_in_title: "true"
       
       # simple keyword with actions
       loggifly.keywords.2.keyword: "timeout" 
       loggifly.keywords.2.action: "restart"
 
-      # comma-separated lists for keywords and excluded keywords
-      loggifly.keywords: "keyword1,keyword2,keyword3"
-      loggifly.excluded_keywords: "keyword4,keyword5,keyword6"
+      # comma-separated list of container events
+      loggifly.container_events: "oom,die,destroy"
+
+      # container event with action and title_template
+      loggifly.container_events.0.event: "crash"
+      loggifly.container_events.0.action: "restart"
+      loggifly.container_events.0.title_template: "{container} crashed with exit code {exit_code}"
+
   ```
 
 

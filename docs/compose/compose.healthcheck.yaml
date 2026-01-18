@@ -1,0 +1,18 @@
+services:
+  loggifly:
+    image: ghcr.io/clemcer/loggifly:latest
+    container_name: loggifly
+    read_only: true
+    environment:
+      ENABLE_HEALTHCHECK: true
+      TZ: Europe/Berlin
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config:/config    # Place your config.yaml file in this directory
+    healthcheck:
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s   
+    restart: unless-stopped

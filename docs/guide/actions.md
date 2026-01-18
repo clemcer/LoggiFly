@@ -2,15 +2,17 @@
 title: Actions
 ---
 
+# Actions
+
 
 ## Container Actions
 
-You can configure actions for your containers. 
-Supported actions are `restart`, `stop` and `start` and are configured per container. 
+You can configure container actions to be triggered when a keyword or pattern is found in the logs or a container event occurs. 
+Supported actions are `restart`, `stop` and `start`. 
 
 You can perform these actions on the monitored container itself or on other containers.
 
-The `action_cooldown` is per action and defaults to 300 seconds (5 minutes) and has to be at least 10 seconds.
+The `action_cooldown` is per action per container and defaults to 300 seconds (5 minutes) and has to be at least 10 seconds.
 
 :::info
 Note that actions require access to the docker socket and generally don't work with a Docker Socket Proxy.

@@ -4,7 +4,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: "LoggiFly",
   description: "LoggiFly Documentation",
-  head: [['link', { rel: 'icon', href: '/loggifly/icon.png' }]],
+  head: [['link', { rel: 'icon', href: '/LoggiFly/favicon.ico' }]],
   base: '/LoggiFly/',
   cleanUrls: true,
   themeConfig: {
@@ -23,7 +23,7 @@ export default defineConfig({
         text: 'Introduction',
         items: [
           { text: 'What is LoggiFly', link: '/guide/what-is-loggifly' },
-          { text: 'Getting Started', link: '/guide/getting-started' }
+          { text: 'Getting Started', link: '/guide/getting-started' },
         ]
       },
        {
@@ -53,18 +53,19 @@ export default defineConfig({
         ]
       },
       {
-        text: 'Advanced Features',
+        text: 'Advanced',
         items: [
           { text: 'Customize Notifications',
             collapsed: true,
             items: [
-              { text: 'Overview', link: '/guide/customize-notifications/' },
-              { text: 'JSON Logs', link: '/guide/customize-notifications/json_template' },
-              { text: 'Plain Text Logs', link: '/guide/customize-notifications/template' },
+              { text: 'Available Fields', link: '/guide/customize-notifications/' },
+              { text: 'Extract from JSON', link: '/guide/customize-notifications/json' },
+              { text: 'Extract from Regex', link: '/guide/customize-notifications/regex' },
             ]
           },
           { text: 'Actions', link: '/guide/actions' },
           { text: 'Remote Hosts', link: '/guide/remote-hosts' },
+          { text: 'Healthcheck', link: '/guide/healthcheck' },
         ]
       },
       {

@@ -26,11 +26,11 @@ features:
     details: Catch simple keywords or complex patterns in log entries that span multiple lines.
     icon: 🔍
   - title: Notifications
-    details: Send notifications directly to Ntfy or via Apprise to 100+ different services (Slack, Discord, Telegram) or even to your own custom endpoint.
+    details: Send notifications directly to ntfy or via Apprise to 100+ different services (Slack, Discord, Telegram) or even to your own custom endpoint.
     icon: 🚨
-  - title: Flexible Configuration
-    details: You can configure LoggiFly via a YAML file, environment variables or in the Docker labels of the container you want to monitor.
-    icon: 🔧
+  - title: Container Events
+    details: Monitor container events like crashes, restarts, starts and stops.
+    icon: 🐳
   - title: Trigger Actions
     details: You can trigger OliveTin actions or configure actions like restart or stop for your containers.
     icon: 🎯
@@ -52,12 +52,9 @@ features:
     icon: 🌐
     linkText: Learn More
     link: /guide/remote-hosts
-  - title: Multi-Platform
-    details: LoggiFly runs on Docker, Docker Swarm and Podman
-    icon: 🐳
-    linkText: Learn More
-    link: /guide/swarm
-
+  - title: Flexible Configuration
+    details: You can configure LoggiFly via a YAML file, environment variables or in the Docker labels of the container you want to monitor.
+    icon: 🔧
 
 ---
 

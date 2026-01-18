@@ -12,16 +12,9 @@ The `config.yaml` file is divided into four main sections:
 4. [**`global_keywords`**](./global-keywords): Keywords that apply to _all_ monitored Containers.
 
 
-> [!IMPORTANT]
-For the program to function you need to configure:
->- **at least one container**
->- **at least one keyword / regex pattern (either set globally or per container)**
->
->  The rest is optional or has default values.
-
 ## Config Template
 
-Here is an example config. This file automatically gets downloaded into your mounted `/config` directory when you start LoggiFly for the first time. 
+Here is an example config for reference showing all available configuration options from this configuration walkthrough.
 ::: details Config Template
 
 <<< @/configs/config_template.yaml{yaml}
