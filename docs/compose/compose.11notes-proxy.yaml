@@ -1,6 +1,6 @@
 services:
   loggifly:
-    image: ghcr.io/clemcer/loggifly:latest
+    image: ghcr.io/clemcer/loggifly:v1
     container_name: loggifly
     # It is recommended to set the user so that the container does not run as root
     user: 1000:1000

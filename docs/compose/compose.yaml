@@ -1,6 +1,6 @@
 services:
   loggifly:
-    image: ghcr.io/clemcer/loggifly:latest
+    image: ghcr.io/clemcer/loggifly:v1
     container_name: loggifly
     read_only: true
     environment:
