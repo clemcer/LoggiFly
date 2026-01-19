@@ -7,7 +7,7 @@ title: Actions
 
 ## Container Actions
 
-You can configure container actions to be triggered when a keyword or pattern is found in the logs or a container event occurs. 
+You can configure container actions to be triggered when a keyword/regex is found in the logs or a container event occurs. 
 Supported actions are `restart`, `stop` and `start`. 
 
 You can perform these actions on the monitored container itself or on other containers.
@@ -24,11 +24,17 @@ Note that actions require access to the docker socket and generally don't work w
 containers:
   action_cooldown: 60  # 1 minute cooldown
   container3:
+    # Act on log matches
     - regex: "process.*(failed|did not finish)" 
       action: restart  # Restart the container when this regex is found
     - keyword: critical
       action: stop     # Stop the container when this keyword is found
       action_cooldown: 10  # 10 seconds cooldown for this action
+
+    # Act on container events
+    - event: crash
+      action: restart
+      message_template: '{action_result_message}'
 ```
 
 ### Perform actions on other containers

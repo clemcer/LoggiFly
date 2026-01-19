@@ -59,9 +59,7 @@ containers:
       - event: start
         attach_logfile: false
       - event: crash
-        action: restart 
         title_template: '{container} crashed with exit code {exit_code}'
-        mesage_template: '{action_result_message}' # this is the output of the 'restart' action
 ```
 
 ::: details Supported events
