@@ -66,7 +66,7 @@ Here is a very **minimal config** that you can edit and paste into a newly creat
 
 ## Docker Compose
 
-For better security it is best practice to use a Docker Socket Proxy when exposing the docker socket to an application. 
+For better security, it is best practice to use a Docker Socket Proxy when exposing the docker socket to an application. 
 Below are some compose examples with two different socket proxies.
 
 If you don't want to use a socket proxy, maybe because you want to use the [container actions](./actions#container-actions) feature, you can also just use the provided compose file with direct docker socket access.

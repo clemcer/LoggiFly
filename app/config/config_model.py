@@ -612,7 +612,6 @@ def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
     filtered_actions = []
     for idx, raw in enumerate(actions, 1):
         if isinstance(raw, (NtfyViewAction, NtfyHttpAction, NtfyBroadcastAction)):
-            logging.debug(f"Ntfy Action: {raw}")
             if len(filtered_actions) >= 3:
                 logging.warning(f"Ntfy Action: You can only have up to 3 actions. Ignoring additional actions: {actions[idx-1:]}")
                 break

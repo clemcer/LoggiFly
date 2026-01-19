@@ -49,17 +49,19 @@ containers:
 ## Monitor Container Events
 
 With the `container_events` option you can monitor container events like start, stop, crash, etc.
-Just like with keywords, you can set settings per container or per event.
+Just like with keywords, you can set settings and actions per container or per event.
 
 ```yaml
 containers:
   container6:
     attach_logfile: true
     container_events:
-      - event: crash
-        title_template: '{container} crashed with exit code {exit_code}'
       - event: start
         attach_logfile: false
+      - event: crash
+        action: restart 
+        title_template: '{container} crashed with exit code {exit_code}'
+        mesage_template: '{action_result_message}' # this is the output of the 'restart' action
 ```
 
 ::: details Supported events
