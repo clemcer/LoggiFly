@@ -7,7 +7,7 @@ from services import trigger_olivetin_action
 from utils import LogAttachment
 
 if TYPE_CHECKING:
-    from monitoring.base import MonitoredUnit
+    from monitoring.base import MonitoredTarget
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +17,14 @@ def process_trigger(
     config: GlobalConfig,
     modular_settings: dict,
     trigger_level_config: dict,
-    monitored_unit: "MonitoredUnit",
+    monitored_target: "MonitoredTarget",
     notification_context: NotificationContext,
 ):
     action_to_perform = trigger_level_config.get("action")
 
-    # Perform action if configured and supported by this unit type
-    if action_to_perform is not None and monitored_unit.supports_container_actions():
-        action_result = monitored_unit.perform_container_action(
+    # Perform action if configured and supported by this target type
+    if action_to_perform is not None and monitored_target.supports_container_actions():
+        action_result = monitored_target.perform_container_action(
             action_to_perform,
             modular_settings.get("action_cooldown", 300),
         )
@@ -40,18 +40,18 @@ def process_trigger(
     attach_logfile = modular_settings.get("attach_logfile", False)
     attachment_lines = modular_settings.get("attachment_lines", 20) if isinstance(modular_settings.get("attachment_lines"), int) else 20
     if attach_logfile:
-        if result := monitored_unit.get_log_tail(attachment_lines):
+        if result := monitored_target.get_log_tail(attachment_lines):
             attachment = LogAttachment(
                 content=result,
-                file_name=f"last_{attachment_lines}_lines_from_{monitored_unit.unit_name}.log",
+                file_name=f"last_{attachment_lines}_lines_from_{monitored_target.target_name}.log",
             )
         else:
-            logger.error(f"Could not create log attachment file for {monitored_unit.unit_name}")
-    
+            logger.error(f"Could not create log attachment file for {monitored_target.target_name}")
+
     # Send notification if not disabled
     disable_notifications = modular_settings.get("disable_notifications", False)
     if disable_notifications:
-        logger.debug(f"Not sending notification for {monitored_unit.unit_name} because notifications are disabled.")
+        logger.debug(f"Not sending notification for {monitored_target.target_name} because notifications are disabled.")
     else:
         title = render_title(notification_context, template=modular_settings.get("title_template"))
         message = render_message(notification_context, template=modular_settings.get("message_template"))

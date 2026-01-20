@@ -2,17 +2,17 @@ from typing import TYPE_CHECKING, Optional
 import threading
 
 from constants import MonitorType
-from monitoring.base import MonitoredUnit, SourceMetadata
+from monitoring.base import MonitoredTarget, SourceMetadata
 
 if TYPE_CHECKING:
     from docker_monitoring.monitor import MonitoredContainerContext, DockerLogMonitor
     from docker_monitoring.helpers import ContainerActionResult
 
 
-class MonitoredContainerUnit(MonitoredUnit):
+class MonitoredContainerTarget(MonitoredTarget):
     """
     Adapter that wraps MonitoredContainerContext + DockerLogMonitor
-    to implement MonitoredUnit protocol.
+    to implement MonitoredTarget protocol.
     """
 
     def __init__(
@@ -24,12 +24,12 @@ class MonitoredContainerUnit(MonitoredUnit):
         self._monitor = monitor
 
     @property
-    def unit_name(self) -> str:
-        return self._context.unit_name
+    def target_name(self) -> str:
+        return self._context.target_name
 
     @property
-    def unit_config(self):
-        return self._context.unit_config
+    def target_config(self):
+        return self._context.target_config
 
     @property
     def stop_monitoring_event(self) -> threading.Event:
@@ -63,7 +63,7 @@ class MonitoredContainerUnit(MonitoredUnit):
     def get_metadata(self) -> SourceMetadata:
         snap = self._context.snapshot
         return SourceMetadata(
-            unit_name=self.unit_name,
+            target_name=self.target_name,
             monitor_type=self._context.monitor_type,
             container_id=snap.id,
             container_name=snap.name,

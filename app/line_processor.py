@@ -13,7 +13,7 @@ from notification_formatter import NotificationContext
 from utils import merge_modular_settings, merge_with_precedence
 from trigger import process_trigger
 if TYPE_CHECKING:
-    from monitoring.base import MonitoredUnit
+    from monitoring.base import MonitoredTarget
 
 class LogProcessor:
     """
@@ -32,8 +32,8 @@ class LogProcessor:
     def __init__(self,
                  logger,
                  config: GlobalConfig,
-                 unit_config: ContainerConfig | SwarmServiceConfig,
-                 monitored_unit: "MonitoredUnit",
+                 target_config: ContainerConfig | SwarmServiceConfig,
+                 monitored_target: "MonitoredTarget",
                  ):
         """
         Initialize the log processor for a specific container, service, or log file.
@@ -41,15 +41,15 @@ class LogProcessor:
         Args:
             logger: Logger instance for this processor
             config: Global configuration object
-            unit_config: Container/service/logfile specific configuration
-            monitored_unit: MonitoredUnit instance providing source abstraction
+            target_config: Container/service/logfile specific configuration
+            monitored_target: MonitoredTarget instance providing source abstraction
         """
         self.logger = logger
-        self.monitored_unit = monitored_unit
-        self.unit_stop_event = monitored_unit.stop_monitoring_event
-        self.unit_name = monitored_unit.unit_name
-        self.monitor_type = monitored_unit.monitor_type
-        self.unit_config = unit_config
+        self.monitored_target = monitored_target
+        self.target_stop_event = monitored_target.stop_monitoring_event
+        self.target_name = monitored_target.target_name
+        self.monitor_type = monitored_target.monitor_type
+        self.target_config = target_config
 
         # Pattern detection state
         self.patterns = []
@@ -64,12 +64,12 @@ class LogProcessor:
         self.line_limit = 300
 
         # These are updated in load_config_variables()
-        self.multi_line_mode = False 
+        self.multi_line_mode = False
         self.time_per_keyword = {}
         self.kw_time_lock = Lock()
 
-        self.load_config_variables(config, unit_config)
-        
+        self.load_config_variables(config, target_config)
+
         # If multi-line mode is on, find starting pattern in logs
         if self.multi_line_mode is True:
             self.log_stream_last_updated = time.time()
@@ -80,9 +80,9 @@ class LogProcessor:
                 if log_tail:
                     self._find_starting_pattern(log_tail)
                 if self.valid_pattern:
-                    self.logger.debug(f"{self.unit_name}: Mode: Multi-Line. Found starting pattern(s) in logs.")
+                    self.logger.debug(f"{self.target_name}: Mode: Multi-Line. Found starting pattern(s) in logs.")
                 else:
-                    self.logger.debug(f"{self.unit_name}: Mode: Single-Line. Could not find starting pattern in the logs. Continuing the search in the next {self.line_limit - self.line_count} lines")
+                    self.logger.debug(f"{self.target_name}: Mode: Single-Line. Could not find starting pattern in the logs. Continuing the search in the next {self.line_limit - self.line_count} lines")
 
     def _get_keywords(self, keywords):
         """
@@ -104,26 +104,26 @@ class LogProcessor:
                 self.logger.debug(f"Did not find correct item type for item: {item}")
         return returned_keywords
 
-    def load_config_variables(self, config: GlobalConfig, unit_config):
+    def load_config_variables(self, config: GlobalConfig, target_config):
         """
         Load and merge configuration for global and container-specific keywords and settings.
         Called on initialization and when reloading config.
-        
+
         Args:
             config: Global configuration object
-            unit_config: ContainerConfig or SwarmServiceConfig
+            target_config: ContainerConfig or SwarmServiceConfig
         """
         self.config = config
-        self.unit_config = unit_config
+        self.target_config = target_config
         self.time_per_keyword = {}
-        unt_cnf = self.unit_config.model_dump(exclude_none=True) if self.unit_config else {}
-        
-        # Merge global and unit-specific keywords
-        self.keywords = self._get_keywords(unt_cnf.get("keywords", []))
-        self.keywords.extend(self._get_keywords(self.config.global_keywords.keywords))        
+        tgt_cnf = self.target_config.model_dump(exclude_none=True) if self.target_config else {}
 
-        # Merge message configuration with precedence: unit_config > global_config
-        self.unit_modular_settings = merge_modular_settings(unt_cnf, config.settings.model_dump(exclude_none=True))
+        # Merge global and target-specific keywords
+        self.keywords = self._get_keywords(tgt_cnf.get("keywords", []))
+        self.keywords.extend(self._get_keywords(self.config.global_keywords.keywords))
+
+        # Merge message configuration with precedence: target_config > global_config
+        self.target_modular_settings = merge_modular_settings(tgt_cnf, config.settings.model_dump(exclude_none=True))
         self.multi_line_mode = config.settings.multi_line_entries
         self.start_flush_thread_if_needed()
 
@@ -159,11 +159,11 @@ class LogProcessor:
         for pattern, count in sorted_patterns:
             if pattern not in self.patterns and count > threshold:
                 self.patterns.append(pattern)
-                self.logger.debug(f"{self.unit_name}: Found pattern: {pattern} with {count} matches of {self.line_count} lines. {round(count / self.line_count * 100, 2)}%")
+                self.logger.debug(f"{self.target_name}: Found pattern: {pattern} with {count} matches of {self.line_count} lines. {round(count / self.line_count * 100, 2)}%")
                 self.valid_pattern = True
                 self.start_flush_thread_if_needed()
         if self.line_count >= self.line_limit and not self.patterns:
-            self.logger.info(f"{self.unit_name}: No pattern found in logs after {self.line_limit} lines. Mode: single-line")
+            self.logger.info(f"{self.target_name}: No pattern found in logs after {self.line_limit} lines. Mode: single-line")
 
         self.waiting_for_pattern = False
 
@@ -190,10 +190,10 @@ class LogProcessor:
             """
             Background thread: flushes buffer after one second passed since last log line.
             """
-            self.logger.debug(f"Flush Thread started for {self.unit_name}.")
+            self.logger.debug(f"Flush Thread started for {self.target_name}.")
             self.flush_thread_stopped.clear()
-            while not self.unit_stop_event.is_set():
-                # Wait for new line event to be set but check every 60 seconds if the unit is stopped
+            while not self.target_stop_event.is_set():
+                # Wait for new line event to be set but check every 60 seconds if the target is stopped
                 self.new_line_event.wait(60)
                 if not self.new_line_event.is_set():
                     continue
@@ -201,15 +201,15 @@ class LogProcessor:
                 while True:
                     time.sleep(1)
                     with self.lock_buffer:
-                        if (time.time() - self.log_stream_last_updated > 1) or self.unit_stop_event.is_set():
+                        if (time.time() - self.log_stream_last_updated > 1) or self.target_stop_event.is_set():
                             if self.buffer:
                                 self._handle_and_clear_buffer()
                                 self.new_line_event.clear()
                             break
             self.flush_thread_stopped.set()
-            self.logger.debug(f"Flush Thread stopped for {self.unit_name}")
+            self.logger.debug(f"Flush Thread stopped for {self.target_name}")
 
-        if not self.unit_stop_event.is_set() and self.multi_line_mode and self.valid_pattern and self.flush_thread_stopped.is_set():
+        if not self.target_stop_event.is_set() and self.multi_line_mode and self.valid_pattern and self.flush_thread_stopped.is_set():
             self.flush_thread = Thread(target=check_flush, daemon=True)
             self.flush_thread.start()
 
@@ -220,7 +220,7 @@ class LogProcessor:
         if log_entry.strip():
             self._search_and_send(log_entry)
         else:
-            self.logger.debug(f"Buffer for {self.unit_name} was empty, nothing to process.")
+            self.logger.debug(f"Buffer for {self.target_name} was empty, nothing to process.")
 
     def _process_multi_line(self, line: str):
         """
@@ -260,8 +260,8 @@ class LogProcessor:
         def get_keyword_setting(key: str, default: Any = None) -> Any:
             if keyword_dict.get(key) is not None:
                 return keyword_dict[key]
-            elif self.unit_modular_settings.get(key) is not None:
-                return self.unit_modular_settings[key]
+            elif self.target_modular_settings.get(key) is not None:
+                return self.target_modular_settings[key]
             return default
 
         def cooldown_is_expired(key: str | tuple[str, ...], notification_cooldown: int, ignore_keyword_time: bool = False) -> bool:
@@ -321,40 +321,40 @@ class LogProcessor:
             return
             
         # When an excluded keyword is found, the log line gets ignored and the function returns
-        if ek := (keyword_level_config.get("excluded_keywords") or []) + (self.unit_modular_settings.get("excluded_keywords") or []):
+        if ek := (keyword_level_config.get("excluded_keywords") or []) + (self.target_modular_settings.get("excluded_keywords") or []):
             for keyword in self._get_keywords(ek):
                 found = self._search_keyword(log_line, keyword, ignore_keyword_time=True)
                 if found:
-                    self.logger.debug(f"Keyword(s) '{keywords_found}' found in '{self.unit_name}' but ignored because excluded keyword '{found}' was found")
+                    self.logger.debug(f"Keyword(s) '{keywords_found}' found in '{self.target_name}' but ignored because excluded keyword '{found}' was found")
                     return
 
-        merged_modular_settings = merge_modular_settings(keyword_level_config, self.unit_modular_settings)
+        merged_modular_settings = merge_modular_settings(keyword_level_config, self.target_modular_settings)
         formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(log_line.splitlines()) + "\n   -----------------------"
-        self.logger.info(f"The following keywords were found in {self.unit_name}: {keywords_found}."
+        self.logger.info(f"The following keywords were found in {self.target_name}: {keywords_found}."
                     + (f" (A Log FIle will be attached)" if merged_modular_settings.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )
-        
+
         notification_context = NotificationContext(
             notification_type=NotificationType.LOG_MATCH,
-            unit_name=self.unit_name,
+            target_name=self.target_name,
             monitor_type=self.monitor_type,
-            source_metadata=self.monitored_unit.get_metadata(),
+            source_metadata=self.monitored_target.get_metadata(),
             keywords_found=keywords_found,
             log_line=log_line,
             regex=keyword_level_config.get("regex"),
-            hostname=self.monitored_unit.hostname,
-            host_identifier=self.monitored_unit.host_identifier,
+            hostname=self.monitored_target.hostname,
+            host_identifier=self.monitored_target.host_identifier,
         )
         process_trigger(
             logger=self.logger,
             config=self.config,
             modular_settings=merged_modular_settings,
             trigger_level_config=keyword_level_config,
-            monitored_unit=self.monitored_unit,
+            monitored_target=self.monitored_target,
             notification_context=notification_context,
         )
 
     def _tail_logs(self, lines=100):
-        """Tail logs from the monitored unit."""
-        return self.monitored_unit.get_log_tail(lines=lines)
+        """Tail logs from the monitored target."""
+        return self.monitored_target.get_log_tail(lines=lines)

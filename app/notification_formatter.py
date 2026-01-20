@@ -121,24 +121,24 @@ def extract_fields_from_regex(log_line: str, regex: Optional[str]) -> Dict[str, 
 
 def default_title_for_log_match(
     keywords_found: List[str],
-    unit_name: str,
+    target_name: str,
 ) -> str:
     """Preserve current default title semantics for log matches."""
     if len(keywords_found) == 1:
-        title = f"'{keywords_found[0]}' found in {unit_name}"
+        title = f"'{keywords_found[0]}' found in {target_name}"
     elif len(keywords_found) == 2:
         joined = " and ".join(f"'{w}'" for w in keywords_found)
-        title = f"{joined} found in {unit_name}"
+        title = f"{joined} found in {target_name}"
     elif len(keywords_found) > 2:
         joined = ", ".join(f"'{w}'" for w in keywords_found)
-        title = f"The following keywords were found in {unit_name}: {joined}"
+        title = f"The following keywords were found in {target_name}: {joined}"
     else:
-        title = unit_name
+        title = target_name
     return title
 
 
-def fallback_title_for_event(unit_name: str, event: Optional[str]) -> str:
-    return f"Event '{event}' for container {unit_name}" if event else f"Event for container {unit_name}"
+def fallback_title_for_event(target_name: str, event: Optional[str]) -> str:
+    return f"Event '{event}' for container {target_name}" if event else f"Event for container {target_name}"
 
 
 @dataclass
@@ -149,7 +149,7 @@ class NotificationContext:
     """
 
     notification_type: NotificationType
-    unit_name: str
+    target_name: str
     monitor_type: MonitorType
     hostname: Optional[str] = None
     host_identifier: Optional[str] = None # hostname for multi-host setups, "manager@node1" or "worker@node2" for swarm, else None
@@ -211,8 +211,8 @@ class NotificationContext:
             "container_name": self.container_name,
             "service_name": self.swarm_service_name,
             "stack_name": self.stack_name,
-            "target_name": self.unit_name,   # unit_name will internally be renamed to target_name in the future 
-            "container": self.unit_name, # legacy template field   
+            "target_name": self.target_name,
+            "container": self.target_name, # legacy template field
             "docker_image": self.image,
             
             "hostname": self.hostname,
@@ -286,13 +286,13 @@ def render_title(
     # Default when no template is provided
     if not title:
         if ctx.notification_type == NotificationType.LOG_MATCH:
-            title = default_title_for_log_match(ctx.keywords_found, ctx.unit_name)
+            title = default_title_for_log_match(ctx.keywords_found, ctx.target_name)
         elif ctx.notification_type == NotificationType.DOCKER_EVENT:
             if ctx.event:
                 logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')}")
                 title, missing = _format_with_safe_dict(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
                 if missing:
-                    title = fallback_title_for_event(ctx.unit_name, ctx.event)
+                    title = fallback_title_for_event(ctx.target_name, ctx.event)
                     logging.warning(f"Missing keys in event default title template: {missing}.")
 
         # Prepend host identifier to title (only exists for multi-host or swarm setups)
@@ -303,7 +303,7 @@ def render_title(
 
     # Safe fallback
     if not title:
-        title = f"{ctx.unit_name}: {context_dict.get('keywords') or context_dict.get('event')}"
+        title = f"{ctx.target_name}: {context_dict.get('keywords') or context_dict.get('event')}"
     # Append action result to title
     return title
 

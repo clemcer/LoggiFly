@@ -217,14 +217,14 @@ def load_config(official_path="/config/config.yaml"):
 
     return config, config_path
 
-def validate_unit_config(monitor_type, config_dict):
+def validate_target_config(monitor_type, config_dict):
     """
     Validate a container or swarm service configuration using the appropriate Pydantic model.
-    
+
     Args:
         monitor_type: MonitorType.CONTAINER or MonitorType.SWARM
         config_dict: Configuration dictionary to validate
-        
+
     Returns:
         Validated config object or None if validation fails
     """
@@ -335,21 +335,21 @@ def convert_legacy_formats(config):
         _migrate_keywords(global_with_attachment, config_copy["global_keywords"]["keywords"], ("attach_logfile", True))
     
     # Migrate container-level legacy fields
-    for unit_type in ["containers", "swarm_services"]:
-        if unit_type not in config_copy:
+    for target_type in ["containers", "swarm_services"]:
+        if target_type not in config_copy:
             continue
-        for unit_config in config_copy.get(unit_type, {}).values():
-            if unit_config is None:
+        for target_config in config_copy.get(target_type, {}).values():
+            if target_config is None:
                 continue
-            unit_config.setdefault("keywords", [])
-            
+            target_config.setdefault("keywords", [])
+
             # Migrate keywords_with_attachment
-            keywords_with_attachment = unit_config.pop("keywords_with_attachment", None)
+            keywords_with_attachment = target_config.pop("keywords_with_attachment", None)
             if keywords_with_attachment is not None:
-                _migrate_keywords(keywords_with_attachment, unit_config["keywords"], ("attach_logfile", True))
-            
+                _migrate_keywords(keywords_with_attachment, target_config["keywords"], ("attach_logfile", True))
+
             # Migrate action_keywords (legacy action format)
-            action_keywords = unit_config.pop("action_keywords", None)
+            action_keywords = target_config.pop("action_keywords", None)
             if action_keywords is not None:
                 for item in action_keywords:
                     if isinstance(item, dict):
@@ -358,13 +358,13 @@ def convert_legacy_formats(config):
                         elif "stop" in item:
                             action = "stop"
                         else:
-                            action = None 
+                            action = None
                         if action:
                             keyword = item[action]
                             if isinstance(keyword, dict) and "regex" in keyword:
-                                unit_config["keywords"].append({"regex": keyword["regex"], "action": action})
+                                target_config["keywords"].append({"regex": keyword["regex"], "action": action})
                             elif isinstance(keyword, str):
-                                unit_config["keywords"].append({"keyword": keyword, "action": action})
+                                target_config["keywords"].append({"keyword": keyword, "action": action})
     return config_copy
 
 

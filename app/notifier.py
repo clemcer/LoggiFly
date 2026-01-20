@@ -117,7 +117,7 @@ def _normalize_and_strip_prefix(d: dict, prefix: str, keys: set[str]) -> dict:
 
 def get_notification_config(modular_settings: dict, global_service_config: dict, prefix: str, keys: set[str]) -> dict:
     """
-    Prepare a notification config with precedence: trigger > unit > global.
+    Prepare a notification config with precedence: trigger > target > global.
     Keys may be provided with or without 'prefix' prefix.
     """
     return merge_with_precedence(

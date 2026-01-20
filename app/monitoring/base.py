@@ -16,7 +16,7 @@ class SourceMetadata:
     Source-agnostic metadata for notifications.
     Used by NotificationContext instead of ContainerSnapshot directly.
     """
-    unit_name: str
+    target_name: str
     monitor_type: MonitorType
 
     # Container-specific fields
@@ -28,23 +28,23 @@ class SourceMetadata:
     labels: Optional[dict] = None
 
 
-class MonitoredUnit(ABC):
+class MonitoredTarget(ABC):
     """
     Abstract base for any monitored log source.
 
     Implementations:
-    - MonitoredContainerUnit: Docker containers and swarm services
+    - MonitoredContainerTarget: Docker containers and swarm services
     """
 
     @property
     @abstractmethod
-    def unit_name(self) -> str:
-        """Unique identifier for this unit (container name, service.replica)."""
+    def target_name(self) -> str:
+        """Unique identifier for this target (container name, service.replica)."""
         ...
 
     @property
     @abstractmethod
-    def unit_config(self) -> "ContainerConfig | SwarmServiceConfig":
+    def target_config(self) -> "ContainerConfig | SwarmServiceConfig":
         """Configuration object (ContainerConfig, SwarmServiceConfig)."""
         ...
 

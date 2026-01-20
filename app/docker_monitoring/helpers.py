@@ -39,14 +39,14 @@ class ContainerSnapshot:
         return self.service_name is not None
 
     @property
-    def unit_name(self) -> str:
+    def target_name(self) -> str:
         """
-        Compute the unit name for this container.
+        Compute the target name for this container.
         For swarm services, includes replica number (e.g., "service.1").
         For regular containers, returns the container name.
         """
         if self.is_swarm_service:
-            return get_service_unit_name(self.labels) or self.name
+            return get_service_target_name(self.labels) or self.name
         return self.name
 
     @classmethod
@@ -253,16 +253,16 @@ def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list
         (containers, selected_containers),
         (swarm_services, selected_swarm_services),
     ]
-    for (config_of_units, selected) in configs_to_check:
-        if not config_of_units:
+    for (config_of_targets, selected) in configs_to_check:
+        if not config_of_targets:
             continue
-        for unit_name in config_of_units:
-            config_object = config_of_units[unit_name]
+        for target_name in config_of_targets:
+            config_object = config_of_targets[target_name]
             if hostname and config_object.hosts is not None:
                 hostnames = config_object.hosts.split(",")
                 if all(hn.strip() != hostname for hn in hostnames):
                     continue
-            selected.append(unit_name)
+            selected.append(target_name)
     return selected_containers, selected_swarm_services
 
 
@@ -281,7 +281,7 @@ def get_service_info(container, client) -> tuple[str, str, dict] | None:
         return service_name, stack_name, {}
 
 
-def get_service_unit_name(labels) -> str | None:
+def get_service_target_name(labels) -> str | None:
     """
     Extract the service name with their replica id from container labels so that we have a unique name for each replica.
     Converts service_name.1.1234567890 to service_name.1
