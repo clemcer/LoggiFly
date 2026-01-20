@@ -5,7 +5,7 @@ import threading
 from threading import Thread, Lock
 from config.config_model import GlobalConfig, KeywordItem, RegexItem, KeywordGroup, ContainerConfig, SwarmServiceConfig
 from constants import (
-    COMPILED_STRICT_PATTERNS, 
+    COMPILED_STRICT_PATTERNS,
     COMPILED_FLEX_PATTERNS,
     NotificationType,
 )
@@ -13,7 +13,7 @@ from notification_formatter import NotificationContext
 from utils import merge_modular_settings, merge_with_precedence
 from trigger import process_trigger
 if TYPE_CHECKING:
-    from docker_monitoring.monitor import MonitoredContainerContext, DockerLogMonitor
+    from monitoring.base import MonitoredUnit
 
 class LogProcessor:
     """
@@ -33,25 +33,22 @@ class LogProcessor:
                  logger,
                  config: GlobalConfig,
                  unit_config: ContainerConfig | SwarmServiceConfig,
-                 monitor_instance: "DockerLogMonitor",
-                 unit_context: "MonitoredContainerContext",
+                 monitored_unit: "MonitoredUnit",
                  ):
         """
-        Initialize the log processor for a specific container or service.
-        
+        Initialize the log processor for a specific container, service, or log file.
+
         Args:
             logger: Logger instance for this processor
             config: Global configuration object
-            unit_config: Container/service specific configuration
-            monitor_instance: DockerLogMonitor instance from which the processor is called
-            unit_context: MonitoredContainerContext instance
+            unit_config: Container/service/logfile specific configuration
+            monitored_unit: MonitoredUnit instance providing source abstraction
         """
         self.logger = logger
-        self.unit_context = unit_context
-        self.unit_stop_event = unit_context.stop_monitoring_event
-        self.unit_name = unit_context.unit_name
-        self.monitor_type = unit_context.monitor_type
-        self.monitor_instance = monitor_instance
+        self.monitored_unit = monitored_unit
+        self.unit_stop_event = monitored_unit.stop_monitoring_event
+        self.unit_name = monitored_unit.unit_name
+        self.monitor_type = monitored_unit.monitor_type
         self.unit_config = unit_config
 
         # Pattern detection state
@@ -342,23 +339,22 @@ class LogProcessor:
             notification_type=NotificationType.LOG_MATCH,
             unit_name=self.unit_name,
             monitor_type=self.monitor_type,
-            container_snapshot=self.unit_context.snapshot,
+            source_metadata=self.monitored_unit.get_metadata(),
             keywords_found=keywords_found,
             log_line=log_line,
             regex=keyword_level_config.get("regex"),
-            hostname=self.unit_context.hostname,
-            host_identifier=self.unit_context.host_identifier,
-        )        
+            hostname=self.monitored_unit.hostname,
+            host_identifier=self.monitored_unit.host_identifier,
+        )
         process_trigger(
             logger=self.logger,
             config=self.config,
             modular_settings=merged_modular_settings,
             trigger_level_config=keyword_level_config,
-            monitor_instance=self.monitor_instance,
-            unit_context=self.unit_context,
+            monitored_unit=self.monitored_unit,
             notification_context=notification_context,
         )
 
     def _tail_logs(self, lines=100):
-        """Tail logs from the container. Calls the tail_logs method of the monitor instance."""
-        return self.monitor_instance.tail_logs(self.unit_context.container_id, lines=lines)
+        """Tail logs from the monitored unit."""
+        return self.monitored_unit.get_log_tail(lines=lines)

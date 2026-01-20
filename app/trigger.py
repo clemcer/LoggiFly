@@ -7,53 +7,51 @@ from services import trigger_olivetin_action
 from utils import LogAttachment
 
 if TYPE_CHECKING:
-    from docker_monitoring.monitor import DockerLogMonitor, MonitoredContainerContext
-    from docker_monitoring.helpers import ContainerActionResult
+    from monitoring.base import MonitoredUnit
 
 logger = logging.getLogger(__name__)
+
 
 def process_trigger(
     logger: logging.Logger,
     config: GlobalConfig,
     modular_settings: dict,
     trigger_level_config: dict,
-    monitor_instance: "DockerLogMonitor",
-    unit_context: "MonitoredContainerContext",
+    monitored_unit: "MonitoredUnit",
     notification_context: NotificationContext,
 ):
     action_to_perform = trigger_level_config.get("action")
 
-    # Perform container action if configured
-    if action_to_perform is not None:
-        action_result: ContainerActionResult = monitor_instance.perform_container_action(
-            modular_settings.get("action_cooldown", 300),
+    # Perform action if configured and supported by this unit type
+    if action_to_perform is not None and monitored_unit.supports_container_actions():
+        action_result = monitored_unit.perform_container_action(
             action_to_perform,
-            unit_context.container_name,
+            modular_settings.get("action_cooldown", 300),
         )
-        notification_context.action_string = action_to_perform
-        notification_context.action_type = action_result.action_type
-        notification_context.action_target = action_result.action_target
-        # append action result no matter which outcome
-        notification_context.action_result = action_result.message
-        notification_context.action_succeeded = action_result.success
+        if action_result:
+            notification_context.action_string = action_to_perform
+            notification_context.action_type = action_result.action_type
+            notification_context.action_target = action_result.action_target
+            notification_context.action_result = action_result.message
+            notification_context.action_succeeded = action_result.success
 
     # Create log file attachment if requested
     attachment: LogAttachment | None = None
     attach_logfile = modular_settings.get("attach_logfile", False)
     attachment_lines = modular_settings.get("attachment_lines", 20) if isinstance(modular_settings.get("attachment_lines"), int) else 20
     if attach_logfile:
-        if result := monitor_instance.tail_logs(unit_context.container_id, attachment_lines):
+        if result := monitored_unit.get_log_tail(attachment_lines):
             attachment = LogAttachment(
-                content=result, 
-                file_name=f"last_{attachment_lines}_lines_from_{unit_context.unit_name}.log",
+                content=result,
+                file_name=f"last_{attachment_lines}_lines_from_{monitored_unit.unit_name}.log",
             )
         else:
-            logger.error(f"Could not create log attachment file for {unit_context.unit_name}")
+            logger.error(f"Could not create log attachment file for {monitored_unit.unit_name}")
     
     # Send notification if not disabled
     disable_notifications = modular_settings.get("disable_notifications", False)
     if disable_notifications:
-        logger.debug(f"Not sending notification for {unit_context.unit_name} because notifications are disabled.")
+        logger.debug(f"Not sending notification for {monitored_unit.unit_name} because notifications are disabled.")
     else:
         title = render_title(notification_context, template=modular_settings.get("title_template"))
         message = render_message(notification_context, template=modular_settings.get("message_template"))

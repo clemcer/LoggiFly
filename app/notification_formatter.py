@@ -7,7 +7,7 @@ from string import Formatter
 from typing import Dict, Optional, List, Any
 
 from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, MonitorType
-from docker_monitoring.helpers import ContainerSnapshot
+from monitoring.base import SourceMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -173,9 +173,9 @@ class NotificationContext:
 
     extra_fields: Dict[str, Any] = field(default_factory=dict)
     time: Optional[int | float] = None
-    
-    # from container snapshot
-    container_snapshot: Optional[ContainerSnapshot] = None
+
+    # from source metadata
+    source_metadata: Optional[SourceMetadata] = None
     container_id: Optional[str] = None
     container_name: Optional[str] = None
     swarm_service_name: Optional[str] = None
@@ -183,13 +183,13 @@ class NotificationContext:
     image: Optional[str] = None
 
     def __post_init__(self):
-        # from container snapshot
-        if self.container_snapshot:
-            self.image = self.container_snapshot.image if not self.image else self.image
-            self.container_id = self.container_snapshot.id if not self.container_id else self.container_id
-            self.swarm_service_name = self.container_snapshot.service_name if not self.swarm_service_name else self.swarm_service_name
-            self.stack_name = self.container_snapshot.stack_name if not self.stack_name else self.stack_name
-            self.container_name = self.container_snapshot.name if not self.container_name else self.container_name
+        # Extract fields from source metadata
+        if self.source_metadata:
+            self.image = self.source_metadata.image if not self.image else self.image
+            self.container_id = self.source_metadata.container_id if not self.container_id else self.container_id
+            self.swarm_service_name = self.source_metadata.service_name if not self.swarm_service_name else self.swarm_service_name
+            self.stack_name = self.source_metadata.stack_name if not self.stack_name else self.stack_name
+            self.container_name = self.source_metadata.container_name if not self.container_name else self.container_name
 
     def get_defaults(self) -> Dict[str, Any]:
                 # Convert Unix timestamp to datetime or use current time

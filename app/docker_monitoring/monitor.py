@@ -32,6 +32,9 @@ from docker_monitoring.helpers import (
     validate_container_for_action, container_action, ContainerActionResult,
     ContainerActionError, ContainerValidationError,
 )
+from monitoring.container_unit import MonitoredContainerUnit
+
+
 class MonitoredContainerContext:
     """
     Runtime monitoring state for a container.
@@ -79,7 +82,7 @@ class MonitoredContainerContext:
         self.processor = None  # Will be set after initialization
         self.currently_configured = True
         self.not_monitored_since: datetime | None = None # time when the container was last monitored. needed for context cleanup
-        
+
     def set_processor(self, processor):
         self.processor = processor
 
@@ -372,13 +375,13 @@ class DockerLogMonitor:
             hostname=self.hostname,
         )
         self._registry.add(ctx)
-        # Create a log processor for this container after creating ctx since processor needs ctx
+        # Create a MonitoredContainerUnit adapter and log processor
+        monitored_unit = MonitoredContainerUnit(ctx, self)
         processor = LogProcessor(
             self.logger,
             self.config,
-            unit_context=ctx,
-            monitor_instance=self,
-            unit_config=ctx.unit_config
+            unit_config=ctx.unit_config,
+            monitored_unit=monitored_unit,
         )
         # Add the processor to the container context
         ctx.set_processor(processor)
@@ -732,11 +735,13 @@ class DockerLogMonitor:
         merged_modular_settings = merge_modular_settings(trigger_level_config, unit_modular_settings)
         exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
         signal = event.get("Actor", {}).get("Attributes", {}).get("signal", None)
+        monitored_unit = MonitoredContainerUnit(ctx, self)
+
         notification_context = NotificationContext(
             notification_type=NotificationType.DOCKER_EVENT,
             unit_name=ctx.unit_name,
-            monitor_type=ctx.monitor_type,
-            container_snapshot=ctx.snapshot,
+            monitor_type=monitored_unit.monitor_type,
+            source_metadata=monitored_unit.get_metadata(),
             event=event_type,
             host_identifier=self.host_identifier,
             hostname=self.hostname,
@@ -749,8 +754,7 @@ class DockerLogMonitor:
             config=self.config,
             modular_settings=merged_modular_settings,
             trigger_level_config=trigger_level_config,
-            monitor_instance=self,
-            unit_context=ctx,
+            monitored_unit=monitored_unit,
             notification_context=notification_context,
         )
 
@@ -808,11 +812,11 @@ class DockerLogMonitor:
             self.logger.error(f"Container {container_id} not found. Cannot tail logs.")
             return None
 
-    def perform_container_action(
+    def trigger_container_action(
         self,
-        action_cooldown: int,
         action_to_perform: str,
         triggered_by_container_name: str,
+        action_cooldown: int,
     ) -> ContainerActionResult:
         """
         Perform a container action if configured.
@@ -902,5 +906,6 @@ class DockerLogMonitor:
                         cooldown_dict = get_cooldown_dict(cooldown_key_container)
                         # TODO: should cooldown even be set on errors? currently it is
                         cooldown_dict[cooldown_key_action] = time.time()
-        self.logger.critical(f"CRITICAL BUG: perform_container_action fell through all code paths for action: {action_to_perform}")
+        self.logger.critical(f"CRITICAL BUG: trigger_container_action fell through all code paths for action: {action_to_perform}")
         return make_result(success=False, message="Internal error: invalid code path")
+        
