@@ -8,6 +8,9 @@ from pydantic import ValidationError, SecretStr
 
 from constants import MonitorType
 from config.models.root import GlobalConfigV2
+from config.helpers import format_pydantic_error, stringify_numbers
+
+
 class ConfigLoadError(Exception):
     """Raised when config file exists but cannot be loaded or parsed"""
     pass
@@ -42,15 +45,16 @@ def load_configv2(path="/config/config.yaml"):
         logging.info(f"The config.yaml file was found in {config_path}.")
 
     # Validate the merged configuration with Pydantic
-    try:
-        config = GlobalConfigV2.model_validate(yaml_config)
-    except ValidationError as e:
-        logging.error(f"Error validating config: {format_pydantic_error(e)}")
-        raise ConfigLoadError(f"Error validating config: {format_pydantic_error(e)}")
-    except Exception as e:
-        logging.error(f"Unexpected error validating config: {e}")
-        raise ConfigLoadError(f"Unexpected error validating config: {e}")
-    # config = GlobalConfigV2.model_validate(yaml_config)
+    # try:
+    #     config = GlobalConfigV2.model_validate(yaml_config)
+    # except ValidationError as e:
+    #     logging.error(f"Error validating config: {format_pydantic_error(e)}")
+    #     raise ConfigLoadError(f"Error validating config: {format_pydantic_error(e)}")
+    # except Exception as e:
+    #     logging.error(f"Unexpected error validating config: {e}")
+    #     raise ConfigLoadError(f"Unexpected error validating config: {e}")
+    yaml_config = stringify_numbers(yaml_config)
+    config = GlobalConfigV2.model_validate(yaml_config)
 
     yaml_output = get_pretty_yaml_config(config)
     logging.info(f"\n ------------- CONFIG ------------- \n{yaml_output}\n ----------------------------------")
@@ -85,7 +89,7 @@ def prettify_config_dict(data):
     """
     if isinstance(data, dict):
         # Put regex/keyword keys first for better readability
-        priority_keys = [k for k in ("regex", "keyword", "keyword_group", "event") if k in data]
+        priority_keys = [k for k in ("regex", "keyword", "keyword_group", "event", "id", "enabled") if k in data]
         if priority_keys:
             rest_keys = [k for k in data.keys() if k not in priority_keys]
             ordered_dict = {k: data[k] for k in priority_keys + rest_keys}
@@ -97,15 +101,3 @@ def prettify_config_dict(data):
         return "**********"  
     else:
         return data
-
-def format_pydantic_error(e: ValidationError) -> str:
-    """
-    Format Pydantic validation errors for user-friendly display.
-    """
-    error_messages = []
-    for error in e.errors():
-        location = ".".join(map(str, error["loc"]))
-        msg = error["msg"]
-        msg = msg.split("[")[0].strip()  # Remove technical details in brackets
-        error_messages.append(f"Field '{location}': {msg}")
-    return "\n".join(error_messages)

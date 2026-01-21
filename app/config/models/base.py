@@ -13,13 +13,17 @@ from config.helpers import (
     validate_ntfy_actions,
     validate_and_filter_olivetin_actions,
     validate_keywords,
+    validate_simple_keywords,
     validate_olivetin_arguments,
+    handle_error,
+    validate_ntfy_priority,
+    strict_config_validation,
 )
 
 class BaseConfigModel(BaseModel):
     """Base configuration model with common Pydantic settings."""
     model_config = ConfigDict(
-        extra="ignore", # TODO: change later, possibly configurable by env
+        extra="forbid" if strict_config_validation() else "ignore", # TODO: change later, possibly configurable by env
         validate_default=True,
         use_enum_values=True,
         from_attributes=False,
@@ -48,11 +52,21 @@ class SettingsConfig(BaseConfigModel):
 # Misc Config Models (shared between models)
 # ================================================
 
-class IgnoreKeywordItem(BaseConfigModel):
-    # Can be simple string or regex
+class SimpleKeywordItem(BaseConfigModel):
     keyword: Optional[str] = None
     regex: Optional[str] = None
 
+    @model_validator(mode="before")
+    def validate_simple_keyword_item(cls, data: dict) -> dict:
+        """
+        Invariant check: ensures exactly one of keyword/regex is set.  
+        Pre-validation in validate_simple_keywords() should filter out invalid items before they reach here.
+        """
+        if not data.get("keyword") and not data.get("regex"):
+            raise ValueError(f"You have to set 'keyword' or 'regex' as a key.")
+        if data.get("keyword") and data.get("regex"):
+            raise ValueError(f"You can only set 'keyword' or 'regex', not both.")
+        return data
 
 class NtfyViewAction(BaseConfigModel):
     action: Literal["view"] = "view"
@@ -86,8 +100,15 @@ NtfyAction = Annotated[
 # ================================================
 # Defaults Config Model
 # ================================================
+                                                                     
+class EmptyDefaultsConfig(BaseConfigModel):
+    ignore_keywords: Optional[List[SimpleKeywordItem]] = None
+    title_template: Optional[str] = None
+    message_template: Optional[str] = None
+    olivetin_url: Optional[str] = None
+    olivetin_username: Optional[str] = None
+    olivetin_password: Optional[SecretStr] = None
 
-class DefaultsConfig(BaseConfigModel):
     ntfy_tags: Optional[str] = None
     ntfy_topic: Optional[str] = None
     ntfy_priority: Optional[Union[str, int]] = None
@@ -106,30 +127,48 @@ class DefaultsConfig(BaseConfigModel):
     webhook_url: Optional[str] = None
     webhook_headers: Optional[dict] = None
 
-    attach_logfile: bool = False
-    notification_cooldown: int = 5
-    title_template: Optional[str] = None
-    message_template: Optional[str] = None
-    action_cooldown: Optional[int] = 60
-    attachment_lines: int = 20
-    hide_full_regex: Optional[bool] = False
-    regex_case_sensitive: bool = True
-    ignore_keywords: Optional[List[Union[str, IgnoreKeywordItem]]] = None
-    disable_notifications: Optional[bool] = None
-    olivetin_url: Optional[str] = None
-    olivetin_username: Optional[str] = None
-    olivetin_password: Optional[SecretStr] = None
-
-    @field_validator("action_cooldown", mode="before")
-    def validate_action_cooldown(cls, v):
-        """Validate action cooldown with minimum value enforcement."""
-        return validate_action_cooldown(v)
-
     @field_validator("ntfy_actions", mode="before")
     def validate_ntfy_actions(cls, v):
         if v and isinstance(v, list):
             return validate_ntfy_actions(v)
         return v   
+
+    @field_validator("ntfy_priority", mode="before")
+    def validate_priority(cls, v):
+        return validate_ntfy_priority(v)
+
+
+    @field_validator("ignore_keywords", mode="before")
+    def validate_ignore_keywords(cls, v):
+        if v and isinstance(v, list):
+            v = validate_simple_keywords(v, "ignore_keywords")
+        return v
+
+
+class ActionCooldownMixin:                                         
+    @field_validator("action_cooldown", mode="before")             
+    def validate_action_cooldown(cls, v):                          
+        return validate_action_cooldown(v)                         
+
+class ModularDefaultsConfig(EmptyDefaultsConfig, ActionCooldownMixin):
+
+    attach_logfile: Optional[bool] = None
+    notification_cooldown: Optional[int] = None
+    action_cooldown: Optional[int] = None
+    attachment_lines: Optional[int] = None
+    hide_full_regex: Optional[bool] = None
+    regex_case_sensitive: Optional[bool] = None
+    disable_notifications: Optional[bool] = None
+
+class RootDefaultsConfig(EmptyDefaultsConfig, ActionCooldownMixin):
+    attach_logfile: bool = False
+    notification_cooldown: int = 5
+    action_cooldown: Optional[int] = 60
+    attachment_lines: int = 20
+    hide_full_regex: Optional[bool] = False
+    regex_case_sensitive: bool = True
+    disable_notifications: Optional[bool] = False
+
 
 # ================================================
 # Notifications Config Models
@@ -148,6 +187,16 @@ class NtfyConfig(BaseConfigModel):
     markdown: Optional[bool] = None
     actions: Optional[List[NtfyAction]] = None
     headers: Optional[dict] = None
+
+    @field_validator("priority", mode="before")
+    def validate_ntfy_priority(cls, v):
+        return validate_ntfy_priority(v)
+
+    @field_validator("actions", mode="before")
+    def validate_ntfy_actions(cls, v):
+        if v and isinstance(v, list):
+            return validate_ntfy_actions(v)
+        return v
 
 class AppriseConfig(BaseConfigModel):  
     url: SecretStr 
@@ -182,14 +231,18 @@ class OliveTinAction(BaseConfigModel):
         return v
 
 
-class KeywordItemBase(DefaultsConfig):
+class KeywordActionsBase(ModularDefaultsConfig):
     """Base class for keyword items with common fields for actions and templates."""
     container_action: Optional[str] = None
     olivetin_actions: Optional[List[OliveTinAction]] = None
 
     @field_validator("container_action")
     def validate_container_action(cls, v):
-        """Validate container action against available actions enum."""
+        """
+        Last defense container action validation (ideally isn't needed) to make sure no invalid action is set.
+        MonitorType specific validation is done in the instantiating class that has the cls._MONITOR_TYPE variable context.
+        Raises ValueError if the container action is invalid (also in strict mode)
+        """
         if v and v.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
             raise ValueError(f"Error in config in field 'container_action': Invalid container action ('{v}')")
         return v    
@@ -201,7 +254,7 @@ class KeywordItemBase(DefaultsConfig):
         return data
 
 
-class RegexItem(KeywordItemBase):
+class RegexItemBase(KeywordActionsBase):
     """
     Model for a regex-based keyword with optional settings.
     Template allows for notification formatting using named capturing groups.
@@ -210,32 +263,35 @@ class RegexItem(KeywordItemBase):
     regex: str
 
 
-class KeywordItem(KeywordItemBase):
+class KeywordItemBase(KeywordActionsBase):
     """
     Model for a string-based keyword with optional settings.
     """
     kind: Literal["keyword"] = Field("keyword", repr=False, exclude=True)
     keyword: str
 
-class KeywordGroup(KeywordItemBase):
+class KeywordGroupBase(KeywordActionsBase):
     """
     Model for a group of keywords that must all be present in a log line.
     All keywords in the group must match for the group to trigger.
     """
     kind: Literal["keyword_group"] = Field("keyword_group", repr=False, exclude=True)
-    keyword_group: List[Union[str, KeywordItem, RegexItem]] = []
+    keyword_group: List[SimpleKeywordItem]
+
+    @field_validator("keyword_group", mode="before")
+    def validate_keyword_group(cls, v):
+        if v and isinstance(v, list):
+            v = validate_simple_keywords(v, "keyword_group")
+        return v
 
 class KeywordBase(BaseConfigModel):
     """Base class for keyword configuration with validation logic."""
-    _MONITOR_TYPE: ClassVar[MonitorType] = MonitorType.CONTAINER
+    _MONITOR_TYPE: ClassVar[MonitorType | None] = None
 
     keywords: List[
-        Union[
-            str,
-            Annotated[
-                Union[KeywordItem, RegexItem, KeywordGroup],
-                Field(discriminator="kind")
-            ]
+        Annotated[
+            KeywordItemBase | RegexItemBase | KeywordGroupBase,
+            Field(discriminator="kind")
         ]
     ] = []
     @model_validator(mode="before")
@@ -243,8 +299,9 @@ class KeywordBase(BaseConfigModel):
         """
         Convert integer keywords to strings and filter out misconfigured entries before validation.
         Also validates container actions and regex patterns.
-        container_actions are validated here because the cls._MONITOR_TYPE variable from the parent class is used.
+        container_actions are validated here because the cls._MONITOR_TYPE variable from the instantiating class is used.
         """
+        assert cls._MONITOR_TYPE is not None, "Internal Error: cls._MONITOR_TYPE is not set in instantiating class"
         if "keywords" in data and isinstance(data["keywords"], list):
             data["keywords"] = validate_keywords(data["keywords"], cls._MONITOR_TYPE)
         return data

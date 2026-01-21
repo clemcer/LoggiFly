@@ -1,11 +1,11 @@
 from config.models.root import GlobalConfigV2             
 from config.models.base import (                          
-    DefaultsConfig,                                       
+    RootDefaultsConfig,                                       
     SettingsConfig,                                       
     NotificationsConfig,                                  
-    KeywordItem,                                          
-    RegexItem,                                            
-    KeywordGroup,                                         
+    KeywordItemBase,                                          
+    RegexItemBase,                                            
+    KeywordGroupBase,                                         
 )                                                         
 from config.models.docker import (                        
     ContainerSourceConfig,                                
@@ -16,7 +16,16 @@ from config.models.docker import (
                                                         
 __all__ = [                                               
     "GlobalConfigV2",                                     
-    "DefaultsConfig",                                     
+    "RootDefaultsConfig",                                     
     "SettingsConfig",                                     
-    # ... etc                                             
-]                                                         
+    "NotificationsConfig",
+    "KeywordItemBase",
+    "RegexItemBase",
+    "KeywordGroupBase",
+    "ContainerSourceConfig",
+    "ContainerPolicy",
+    "SwarmSourceConfig",
+    "SwarmPolicy",
+]              
+
+# TODO: verify all models are included and correct
