@@ -348,7 +348,7 @@ class SwarmServiceConfig(KeywordBase, ContainerEventBase, ModularSettings):
     hosts: Optional[str] = None
 
     
-class GlobalKeywords(BaseConfigModel, KeywordBase):
+class GlobalKeywords(KeywordBase, ContainerEventBase):
     """Global keyword configuration that applies to all monitored containers."""
     pass
 

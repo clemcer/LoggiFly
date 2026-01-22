@@ -717,12 +717,15 @@ class DockerLogMonitor:
         """
         Process a Docker event.
         """
-        if not ctx.unit_config.container_events:
-            return
-        configured_events: list[ContainerEventConfig] = ctx.unit_config.container_events
         event_type = parse_event_type(event)
         if not event_type:
             return
+
+        unit_events = ctx.unit_config.container_events 
+        global_events = self.config.global_keywords.container_events
+        if not unit_events and not global_events:
+            return
+        configured_events = (unit_events or []) + (global_events or [])
         ce = next((ce for ce in configured_events if ce.event == event_type), None)
         if not ce:
             return
