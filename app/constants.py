@@ -7,6 +7,14 @@ class MonitorType(Enum):
     CONTAINER = "container"
     SWARM = "swarm"
 
+# NTFY_PREFIX = "ntfy_"
+# APPRISE_PREFIX = "apprise_"
+# WEBHOOK_PREFIX = "webhook_"
+
+class NotificationPrefix(Enum):
+    NTFY = "ntfy_"
+    APPRISE = "apprise_"
+    WEBHOOK = "webhook_"
 
 # Log Pattern Constants
 # These patterns are used to detect the start of new log entries in multi-line mode.

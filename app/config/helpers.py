@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from constants import MonitorType, SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_CONTAINER_EVENTS
 
 def strict_config_validation() -> bool:
-    return os.getenv("LOGGIFLY_STRICT_CONFIG", "true").lower() == "true"
+    return os.getenv("LOGGIFLY_STRICT_CONFIG", "true").lower() == "true" # TODO: think about default
 
 def handle_error(message: str, consequence: str | None = None):
     if strict_config_validation():
@@ -30,7 +30,7 @@ def format_pydantic_error(e: ValidationError) -> str:
         error_messages.append(f"Error in config in field '{location}': {msg}")
     return "\n".join(error_messages)
 
-def stringify_numbers(data):                            
+def stringify_numbers(data: dict) -> dict:                            
     """Recursively convert ints/floats to strings in a config dict.                                            
                                                         
     Safe because Pydantic coerces strings back to int/float where needed,                                 

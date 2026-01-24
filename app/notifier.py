@@ -7,7 +7,7 @@ from pydantic import SecretStr
 import urllib.parse
 from config.config_model import GlobalConfig
 from email.header import Header
-from constants import EMOJI_PATTERN
+from constants import EMOJI_PATTERN, NotificationPrefix
 from notification_formatter import NotificationContext
 from utils import merge_with_precedence, LogAttachment
 
@@ -22,9 +22,9 @@ NTFY_KEYS = {
 APPRISE_KEYS = {"url"}
 WEBHOOK_KEYS = {"url", "headers"}
 
-NTFY_PREFIX = "ntfy_"
-APPRISE_PREFIX = "apprise_"
-WEBHOOK_PREFIX = "webhook_"
+NTFY_PREFIX = NotificationPrefix.NTFY.value
+APPRISE_PREFIX = NotificationPrefix.APPRISE.value
+WEBHOOK_PREFIX = NotificationPrefix.WEBHOOK.value
 
 
 def emoji_to_rfc2047(match):

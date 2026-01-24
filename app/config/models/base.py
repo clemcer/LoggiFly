@@ -100,15 +100,8 @@ NtfyAction = Annotated[
 # ================================================
 # Defaults Config Model
 # ================================================
-                                                                     
-class EmptyDefaultsConfig(BaseConfigModel):
-    ignore_keywords: Optional[List[SimpleKeywordItem]] = None
-    title_template: Optional[str] = None
-    message_template: Optional[str] = None
-    olivetin_url: Optional[str] = None
-    olivetin_username: Optional[str] = None
-    olivetin_password: Optional[SecretStr] = None
 
+class NotificationDefaultsConfig(BaseConfigModel):
     ntfy_tags: Optional[str] = None
     ntfy_topic: Optional[str] = None
     ntfy_priority: Optional[Union[str, int]] = None
@@ -137,6 +130,13 @@ class EmptyDefaultsConfig(BaseConfigModel):
     def validate_priority(cls, v):
         return validate_ntfy_priority(v)
 
+class EmptyDefaultsConfig(NotificationDefaultsConfig):
+    ignore_keywords: Optional[List[SimpleKeywordItem]] = None
+    title_template: Optional[str] = None
+    message_template: Optional[str] = None
+    olivetin_url: Optional[str] = None
+    olivetin_username: Optional[str] = None
+    olivetin_password: Optional[SecretStr] = None
 
     @field_validator("ignore_keywords", mode="before")
     def validate_ignore_keywords(cls, v):
@@ -145,7 +145,8 @@ class EmptyDefaultsConfig(BaseConfigModel):
         return v
 
 
-class ActionCooldownMixin:                                         
+class ActionCooldownMixin:
+
     @field_validator("action_cooldown", mode="before")             
     def validate_action_cooldown(cls, v):                          
         return validate_action_cooldown(v)                         
@@ -293,7 +294,7 @@ class KeywordBase(BaseConfigModel):
             KeywordItemBase | RegexItemBase | KeywordGroupBase,
             Field(discriminator="kind")
         ]
-    ] = []
+    ] | None = None # TODO: optional or not?
     @model_validator(mode="before")
     def validate_keywords(cls, data: dict) -> dict:
         """
