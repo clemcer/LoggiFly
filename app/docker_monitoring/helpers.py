@@ -1,4 +1,3 @@
-from config.config_model import GlobalConfig
 from dataclasses import dataclass
 import os
 import re
@@ -82,13 +81,16 @@ class ContainerActionResult:
     action_target: str # e.g. "container_name"
     is_on_cooldown: bool = False
 
+
 class ContainerActionError(Exception):
     """Base exception for container action failures"""
     pass
 
+
 class ContainerValidationError(ContainerActionError):
     """Container state is invalid for the requested action"""
     pass
+
 
 def format_docker_error(error: Exception) -> str:
     """
@@ -106,6 +108,7 @@ def format_docker_error(error: Exception) -> str:
     if "timeout" in error_str.lower():
         return "Operation timed out"
     return "See logs for details."
+
 
 def cleanup_stale_action_cooldowns(
     action_cooldowns: dict,
@@ -132,7 +135,7 @@ def cleanup_stale_action_cooldowns(
         # Check if ALL actions for this container are stale
         if all(timestamp < cutoff_time for timestamp in actions.values()):
             stale_containers.append(container)
-    # Remove stale containers
+    # Remove
     for container in stale_containers:
         del action_cooldowns[container]
     # Also cleanup stale individual actions within containers
@@ -238,32 +241,6 @@ def container_action(container: Container, action: str, logger: logging.Logger) 
         logger.debug(traceback.format_exc())
         error_detail = format_docker_error(e)
         raise ContainerActionError(f"Failed to {action} {container_name}. {error_detail}")
-
-
-def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list[str]]:
-    selected_containers = []
-    selected_swarm_services = []
-    host_config = config.hosts.get(hostname) if isinstance(config.hosts, dict) and hostname else None
-    containers = dict(config.containers or {})
-    if host_config:
-        containers.update(host_config.containers or {})    
-    swarm_services = config.swarm_services or {}
-    
-    configs_to_check = [
-        (containers, selected_containers),
-        (swarm_services, selected_swarm_services),
-    ]
-    for (config_of_targets, selected) in configs_to_check:
-        if not config_of_targets:
-            continue
-        for target_name in config_of_targets:
-            config_object = config_of_targets[target_name]
-            if hostname and config_object.hosts is not None:
-                hostnames = config_object.hosts.split(",")
-                if all(hn.strip() != hostname for hn in hostnames):
-                    continue
-            selected.append(target_name)
-    return selected_containers, selected_swarm_services
 
 
 def get_service_info(container, client) -> tuple[str, str, dict] | None:

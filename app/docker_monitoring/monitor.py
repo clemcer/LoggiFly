@@ -11,30 +11,30 @@ import docker
 from docker.models.containers import Container
 import docker.errors
 from datetime import datetime, timedelta
+
 from notifier import send_notification
 from line_processor import LogProcessor
-from config.config_model import GlobalConfig, ContainerConfig, SwarmServiceConfig
-from config.config_model import ContainerEventConfig
-from config.load_config import get_pretty_yaml_config
 from constants import (
     MonitorType,
     MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS,
     NotificationType,
     SUPPORTED_CONTAINER_ACTIONS,
 )
-from utils import convert_to_int, merge_modular_settings
+from utils import convert_to_int, merge_trigger_context
 from notification_formatter import NotificationContext
 from trigger import process_trigger
-from docker_monitoring.decision import MonitorDecision
 from docker_monitoring.helpers import (
-    ContainerSnapshot, get_configured, parse_action_target,
+    ContainerSnapshot, parse_action_target,
     parse_event_type, swarm_mode_enabled, cleanup_stale_action_cooldowns,
     validate_container_for_action, container_action, ContainerActionResult,
     ContainerActionError, ContainerValidationError,
 )
-from monitoring.container_target import MonitoredContainerTarget
-
-
+from monitoring import (
+    MonitoredContainerTarget,
+    EffectiveTargetConfig, 
+)
+from config.models import GlobalConfig, ContainerEventConfig
+from docker_monitoring.decision import MonitorDecision
 class MonitoredContainerContext:
     """
     Runtime monitoring state for a container.
@@ -46,9 +46,8 @@ class MonitoredContainerContext:
     def __init__(
         self,
         snapshot: ContainerSnapshot,
-        config_key: str,
-        target_config: ContainerConfig | SwarmServiceConfig,
-        config_via_labels: bool,
+        target_config: EffectiveTargetConfig,
+        decision: MonitorDecision,
         host_identifier: str | None,
         hostname: str
         ):
@@ -57,14 +56,15 @@ class MonitoredContainerContext:
 
         Args:
             snapshot: Container metadata snapshot
-            config_key: Configuration key (container/service name)
-            target_config: Target configuration object
+            # config_key: Configuration key (container/service name)
+            target_config: Effective target configuration object
             config_via_labels: Whether config came from Docker labels
         """
         self.snapshot = snapshot
-        self.config_key = config_key
+        # self.config_key = config_key
         self.target_config = target_config
-        self.config_via_labels = config_via_labels
+        self.target_config_dict = target_config.model_dump(exclude_none=True)
+        self.decision = decision
         self.host_identifier = host_identifier
         self.hostname = hostname
 
@@ -196,7 +196,13 @@ class DockerLogMonitor:
     Handles config reloads, container start/stop, and log processing.
     """
     
-    def __init__(self, config, client, hostname, host_url, multi_host: bool = False):
+    def __init__(
+        self, config: GlobalConfig, 
+        client: docker.DockerClient,
+        hostname: str,
+        host_url: str,
+        multi_host: bool = False,
+        ):
         """Initialize Docker log monitor for a specific host."""
         self.hostname = hostname
         self.host_url = host_url
@@ -319,11 +325,12 @@ class DockerLogMonitor:
 
         # Start monitoring
         target_name = snapshot.target_name
-        if decision.config_via_labels:
-            self.logger.info(
-                f"Monitoring {target_name} via docker labels.\
-                \nConfig:\n{get_pretty_yaml_config(decision.target_config, top_level_key=target_name)}"
-                )
+        self.logger.debug(f"Monitoring {target_name}: {decision.reason}\nMatched rules: {decision.matched_rules}\nMatched overlays: {decision.matched_overlays}")
+        # if decision.config_via_labels:
+        #     self.logger.info(
+        #         f"Monitoring {target_name} via docker labels.\
+        #         \nConfig:\n{get_pretty_yaml_config(decision.target_config, top_level_key=target_name)}"
+        #         )
 
         container_context = self._prepare_monitored_container_context(container, snapshot, decision)
         container_context.currently_configured = True
@@ -337,9 +344,9 @@ class DockerLogMonitor:
         decision: MonitorDecision
         ) -> MonitoredContainerContext:
         """Prepare or reuse monitoring context for a container."""
-        assert decision.config_key is not None, "config_key must be set when monitoring"
+        # assert decision.config_key is not None, "config_key must be set when monitoring"
         assert decision.target_config is not None, "target_config must be set when monitoring"
-        assert decision.config_via_labels is not None, "config_via_labels must be set when monitoring"
+        assert decision.matched_via_labels is not None, "config_via_labels must be set when monitoring"
 
         monitor_type = MonitorType.SWARM if snapshot.is_swarm_service else MonitorType.CONTAINER
 
@@ -350,11 +357,13 @@ class DockerLogMonitor:
             else:
                 if not self._stop_and_close_stream(ctx, wait_for_thread=True):
                     self.logger.warning(f"Old monitoring thread for {snapshot.target_name} might not have been closed.")
+                # time.sleep(0.5) # TODO: test this more. migth be needed to avoid race conditions.
                 self.logger.debug(f"{snapshot.target_name}: Re-Using old context")
                 self._registry.update_id(ctx.container_id, container.id)
                 ctx.snapshot = snapshot
                 ctx.target_config = decision.target_config
-                ctx.config_via_labels = decision.config_via_labels
+                ctx.target_config_dict = decision.target_config.model_dump(exclude_none=True)
+                ctx.decision = decision
                 ctx.target_name = snapshot.target_name
                 ctx.container_name = snapshot.name
                 # ctx.container_id = snapshot.id # handled in _registry.update_id()
@@ -368,9 +377,8 @@ class DockerLogMonitor:
 
         ctx = MonitoredContainerContext(
             snapshot=snapshot,
-            config_key=decision.config_key,
             target_config=decision.target_config,
-            config_via_labels=decision.config_via_labels,
+            decision=decision,
             host_identifier=self.host_identifier,
             hostname=self.hostname,
         )
@@ -380,7 +388,6 @@ class DockerLogMonitor:
         processor = LogProcessor(
             self.logger,
             self.config,
-            target_config=ctx.target_config,
             monitored_target=monitored_target,
         )
         # Add the processor to the container context
@@ -399,9 +406,9 @@ class DockerLogMonitor:
             finally:
                 ctx.log_stream = None
                 ctx.not_monitored_since = datetime.now()
-            if wait_for_thread and not ctx.monitoring_stopped_event.wait(wait_timeout):
-                self.logger.debug(f"Monitoring thread for {ctx.target_name} did not stop within {wait_timeout} seconds.")
-                return False
+        if wait_for_thread and not ctx.monitoring_stopped_event.wait(wait_timeout):
+            self.logger.debug(f"Monitoring thread for {ctx.target_name} did not stop within {wait_timeout} seconds.")
+            return False
         return True
 
     def _stop_and_remove_context(self, container_context: MonitoredContainerContext, wait_timeout: float = 2.0, wait_for_thread: bool = True):
@@ -463,6 +470,7 @@ class DockerLogMonitor:
         return ""
 
     def _start_message(self) -> str:
+        # TODO: show matched rules and overlays? Maybe configurable
         def format_section(title: str, items: list[str], indent: int = 0) -> str:
             if not items:
                 return ""
@@ -475,33 +483,17 @@ class DockerLogMonitor:
                 f"{indent_str} - " + f"\n{indent_str} - ".join(items)
             )
 
-        selected_containers, selected_swarm_services = get_configured(self.config, self.hostname)
         # --- Standalone containers ---
         monitored_containers = [
             c.target_name
             for c in self._registry.get_actively_monitored(monitor_type=MonitorType.CONTAINER)
         ]
-        monitored_set = set(monitored_containers)
-        configured_not_running = sorted(set(selected_containers) - monitored_set)
-        container_block = "\n\n".join(
-            s for s in [
-                format_section(f"✅ Running & monitored containers ({len(monitored_containers)})", monitored_containers),
-                format_section(f"❌ Configured but not running containers ({len(configured_not_running)})", configured_not_running),
-            ]
-            if s
-        )
+        container_block = format_section(f"✅ Monitored containers ({len(monitored_containers)})", monitored_containers)
         # --- Swarm ---
         actively_monitored_swarm = list(self._registry.get_actively_monitored(monitor_type=MonitorType.SWARM))
         monitored_swarm_tasks = [x.target_name for x in actively_monitored_swarm]
-        monitored_swarm_service_keys = {x.config_key for x in actively_monitored_swarm}
-        swarm_services_not_running = sorted(set(selected_swarm_services) - monitored_swarm_service_keys)
-        swarm_block = "\n\n".join(
-            s for s in [
-                format_section(f"✅ Running & monitored Swarm tasks / containers ({len(monitored_swarm_tasks)})", monitored_swarm_tasks),
-                format_section(f"❌ Swarm services not running ({len(swarm_services_not_running)})", swarm_services_not_running),
-            ]
-            if s
-        )
+        swarm_block = format_section(f"✅ Monitored Swarm tasks / containers ({len(monitored_swarm_tasks)})", monitored_swarm_tasks)
+        
         if not container_block and not swarm_block:
             message = "❌ No containers or Swarm services are configured."
         else:
@@ -583,6 +575,7 @@ class DockerLogMonitor:
             target_name = container_context.target_name
             processor = container_context.processor
             gen = container_context.generation
+            self.logger.debug(f"Starting monitoring thread for container {target_name} with generation {gen}")
             if driver in ('none', ''):
                 self.logger.warning(f"Container {container.name} has LoggingDriver 'none'. No logs available.")
                 stop_monitoring_event.set()
@@ -681,19 +674,21 @@ class DockerLogMonitor:
                                 container = self.client.containers.get(container_id)
                             except docker.errors.NotFound:
                                 self.logger.debug(f"Docker Event Handler: Container {container_id} not found.")
-                            if container and self._maybe_monitor_container(container):
+                            if container and container.id and self._maybe_monitor_container(container):
                                 if self.config.settings.disable_monitor_event_message is False:
                                     target_name = ctx.target_name if (ctx := self._registry.get_by_id(container.id)) else container_name
                                     # TODO: maybe add template fields
                                     send_notification(self.config, title=self.loggifly_notification_title, message=f"Monitoring new container: {target_name}")
 
-                        elif event.get("Action") == "stop":
+                        elif event.get("Action") == "stop": # TODO: or die?
                             if ctx := self._registry.get_by_id(container_id):
                                 self.logger.debug(f"The Container {container_name or container_id} was stopped. Stopping Monitoring now.")
                                 self._stop_and_close_stream(ctx, wait_for_thread=False)
 
                         if (ctx:= self._registry.get_by_id(container_id)) and ctx.currently_configured:
-                            self._process_event(event, ctx)
+                        # TODO: do it in separate thread. Especially necessary when container_actions are performed
+                        # Or maybe just put process_trigger in separate thread?
+                            self._process_event(event, ctx) 
 
                 except docker.errors.NotFound as e:
                     self.logger.error(f"Docker Event Handler: Container {container} not found: {e}")
@@ -730,11 +725,12 @@ class DockerLogMonitor:
         if not ce:
             return
         self.logger.debug(f"Event {event_type} for container {ctx.target_name} is configured. Processing event.")
-        target_modular_settings = merge_modular_settings(ctx.target_config.model_dump(), self.config.settings.model_dump())
-        trigger_level_config = ce.model_dump()
-        merged_modular_settings = merge_modular_settings(trigger_level_config, target_modular_settings)
+
+        trigger_level_config = ce.model_dump(exclude_none=True)
+        trigger_context = merge_trigger_context(trigger_level_config, ctx.target_config_dict)
         exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
         signal = event.get("Actor", {}).get("Attributes", {}).get("signal", None)
+
         monitored_target = MonitoredContainerTarget(ctx, self)
 
         notification_context = NotificationContext(
@@ -752,8 +748,7 @@ class DockerLogMonitor:
         process_trigger(
             logger=self.logger,
             config=self.config,
-            modular_settings=merged_modular_settings,
-            trigger_level_config=trigger_level_config,
+            trigger_context=trigger_context,
             monitored_target=monitored_target,
             notification_context=notification_context,
         )

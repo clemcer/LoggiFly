@@ -17,10 +17,12 @@ from typing import List
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from config.load_config import load_config, format_pydantic_error, ConfigLoadError
 from docker_monitoring.monitor import DockerLogMonitor
 from notifier import send_notification
-from utils import convert_to_int
+from utils import convert_to_int, get_env_var
+
+from config.load_config import load_config, ConfigLoadError
+from config.helpers import format_pydantic_error
 
 logging.basicConfig(
     level="INFO",
@@ -40,7 +42,7 @@ class DockerClientInfo:
     client: docker.DockerClient
     tls_config: TLSConfig | None
     label: str | None
-    hostname: str | None
+    hostname: str
     monitor: DockerLogMonitor | None = None
 
 
@@ -402,11 +404,14 @@ def start_loggifly():
     Returns:
         threading.Event: Global shutdown event that can be waited on
     """
+    log_level = str(get_env_var("LOG_LEVEL", "INFO")).upper()
+    logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
     try:
         config, path = load_config()
     except (ValidationError, ConfigLoadError) as e:
         if isinstance(e, ValidationError):
-            logging.critical(f"Config validation failed: {format_pydantic_error(e)}")
+            logging.critical(f"Config validation failed: {format_pydantic_error(e)} (Enable Debug Logging (via env) to see full pydantic error)")
+            logging.debug(e)
         else:
             logging.critical("Config loading failed")
         logging.info("Waiting 5s to prevent restart loop...")

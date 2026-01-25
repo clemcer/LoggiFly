@@ -5,22 +5,21 @@ import base64
 import logging
 from pydantic import SecretStr
 import urllib.parse
-from config.config_model import GlobalConfig
 from email.header import Header
 from constants import EMOJI_PATTERN, NotificationPrefix
 from notification_formatter import NotificationContext
 from utils import merge_with_precedence, LogAttachment
 
+from config.models import GlobalConfig
+from config.models import NtfyConfig, AppriseConfig, WebhookConfig
+
 
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
 
-NTFY_KEYS = {
-    "url", "topic", "token", "username", "password", "tags",
-    "priority", "actions", "icon", "click", "markdown", "headers"
-    }
-APPRISE_KEYS = {"url"}
-WEBHOOK_KEYS = {"url", "headers"}
+NTFY_KEYS = set(NtfyConfig.model_fields.keys())
+APPRISE_KEYS = set(AppriseConfig.model_fields.keys())
+WEBHOOK_KEYS = set(WebhookConfig.model_fields.keys())
 
 NTFY_PREFIX = NotificationPrefix.NTFY.value
 APPRISE_PREFIX = NotificationPrefix.APPRISE.value
@@ -123,10 +122,9 @@ def get_notification_config(modular_settings: dict, global_service_config: dict,
     return merge_with_precedence(
         _normalize_and_strip_prefix(modular_settings, prefix, keys),
         _normalize_and_strip_prefix(global_service_config, prefix, keys),
-        list_union=False,
-        dict_merge=False,
+        list_union=True,
+        dict_merge=True,
     )
-
 
 def send_apprise_notification(url, message, title, attachment: LogAttachment | None = None):
     """
@@ -268,28 +266,27 @@ def send_webhook(json_data: dict, webhook_config: dict):
     except requests.RequestException as e:
         logger.error(f"Error trying to send webhook to url: {url}, headers: {headers}: %s", e)
 
-
-def send_notification(config: GlobalConfig, 
-                      title: str, 
-                      message: str,
-                      modular_settings: dict | None = None,
-                      attachment: LogAttachment | None = None,
-                      notification_context: NotificationContext | None = None,
-                      ):
+def send_notification(
+    config: GlobalConfig, 
+    title: str, 
+    message: str,
+    trigger_context: dict | None = None,
+    attachment: LogAttachment | None = None,
+    notification_context: NotificationContext | None = None,
+    ):
     """
     Dispatch a notification using ntfy, Apprise, and/or webhook based on configuration.
     Handles message formatting, file attachments, and host labeling.
     """
     message = message.replace(r"\n", "\n").strip() if message else ""
     nc = config.notifications.model_dump(exclude_none=True)
-    ntfy_config = get_notification_config(modular_settings or {}, nc.get("ntfy", {}), NTFY_PREFIX, NTFY_KEYS)
-    apprise_url = get_notification_config(modular_settings or {}, nc.get("apprise", {}), APPRISE_PREFIX, APPRISE_KEYS).get("url")
-    webhook_config = get_notification_config(modular_settings or {}, nc.get("webhook", {}), WEBHOOK_PREFIX, WEBHOOK_KEYS)
+    ntfy_config = get_notification_config(trigger_context or {}, nc.get("ntfy", {}), NTFY_PREFIX, NTFY_KEYS)
+    apprise_url = get_notification_config(trigger_context or {}, nc.get("apprise", {}), APPRISE_PREFIX, APPRISE_KEYS).get("url")
+    webhook_config = get_notification_config(trigger_context or {}, nc.get("webhook", {}), WEBHOOK_PREFIX, WEBHOOK_KEYS)
 
     # Send ntfy notification if configured
     if ntfy_config and ntfy_config.get("url") and ntfy_config.get("topic"):
         send_ntfy_notification(ntfy_config, message=message, title=title, attachment=attachment)
-
     # Send Apprise notification if configured   
     if apprise_url:
         send_apprise_notification(apprise_url, message=message, title=title, attachment=attachment)

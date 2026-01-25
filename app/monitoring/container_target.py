@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Optional
 import threading
 
 from constants import MonitorType
-from monitoring.base import MonitoredTarget, SourceMetadata
+from monitoring import MonitoredTarget, SourceMetadata, EffectiveTargetConfig
 
 if TYPE_CHECKING:
     from docker_monitoring.monitor import MonitoredContainerContext, DockerLogMonitor
@@ -28,7 +28,7 @@ class MonitoredContainerTarget(MonitoredTarget):
         return self._context.target_name
 
     @property
-    def target_config(self):
+    def target_config(self) -> EffectiveTargetConfig:
         return self._context.target_config
 
     @property

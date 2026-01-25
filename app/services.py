@@ -5,7 +5,6 @@ from pydantic import SecretStr
 
 logger = logging.getLogger(__name__)
 
-
 class OlivetinAction:
     """
     Trigger action via Olivetin API.
@@ -124,9 +123,9 @@ _olivetin_action = None
 
 def perform_olivetin_action(
     url: str,
-    username: str,
-    password: str | SecretStr,
     olivetin_action_config: dict,
+    username: str | None = None,
+    password: str | SecretStr | None = None,
 ) -> tuple[str, str]:
     """
     Perform an OliveTin action.
@@ -166,7 +165,7 @@ def perform_olivetin_action(
     return title, message
 
 def trigger_olivetin_action(
-    settings: dict,
+    trigger_context: dict,
     action_cfg: dict,
     logger: logging.Logger,
     *,
@@ -177,24 +176,29 @@ def trigger_olivetin_action(
     Run an OliveTin action in a background thread using merged settings.
 
     Args:
-        settings: merged settings containing olivetin_url/username/password (+ optional disable_notifications).
+        trigger_context: trigger context containing olivetin_url/username/password (+ optional disable_notifications).
         action_cfg: OliveTin action dict (id, arguments).
         logger: logger instance for diagnostics.
         send_notification_cb: callable(title, message) to emit a notification (optional).
-        disable_notifications: explicit override; defaults to settings["disable_notifications"].
+        disable_notifications: explicit override; defaults to trigger_context.get("disable_notifications").
     """
-    url = (settings or {}).get("olivetin_url")
-    username = (settings or {}).get("olivetin_username")
-    password = (settings or {}).get("olivetin_password")
-    disable = disable_notifications if disable_notifications is not None else (settings or {}).get("disable_notifications") or False
+    url = trigger_context.get("olivetin_url")
+    username = trigger_context.get("olivetin_username")
+    password = trigger_context.get("olivetin_password")
+    disable = disable_notifications if disable_notifications is not None else trigger_context.get("disable_notifications") or False
 
-    if not url or not username or not password:
-        logger.error("Could not start OliveTin action because URL, username or password is not set.")
+    if not url:
+        logger.error("Could not start OliveTin action because URL is not set.")
         return None
 
     def _run_action():
         try:
-            result = perform_olivetin_action(url, username, password, action_cfg)
+            result = perform_olivetin_action(
+                url=url,
+                username=username,
+                password=password,
+                olivetin_action_config=action_cfg,
+            )
         except Exception as e:
             logger.error("Olivetin action failed: %s", e)
             return

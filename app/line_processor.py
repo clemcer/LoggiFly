@@ -1,19 +1,19 @@
 import re
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 import threading
 from threading import Thread, Lock
-from config.config_model import GlobalConfig, KeywordItem, RegexItem, KeywordGroup, ContainerConfig, SwarmServiceConfig
+
 from constants import (
     COMPILED_STRICT_PATTERNS,
     COMPILED_FLEX_PATTERNS,
     NotificationType,
 )
 from notification_formatter import NotificationContext
-from utils import merge_modular_settings, merge_with_precedence
+from utils import merge_trigger_context, merge_with_precedence
 from trigger import process_trigger
-if TYPE_CHECKING:
-    from monitoring.base import MonitoredTarget
+from config.models import GlobalConfig
+from monitoring import MonitoredTarget, EffectiveTargetConfig
 
 class LogProcessor:
     """
@@ -32,7 +32,6 @@ class LogProcessor:
     def __init__(self,
                  logger,
                  config: GlobalConfig,
-                 target_config: ContainerConfig | SwarmServiceConfig,
                  monitored_target: "MonitoredTarget",
                  ):
         """
@@ -49,7 +48,7 @@ class LogProcessor:
         self.target_stop_event = monitored_target.stop_monitoring_event
         self.target_name = monitored_target.target_name
         self.monitor_type = monitored_target.monitor_type
-        self.target_config = target_config
+        self.target_config = monitored_target.target_config
 
         # Pattern detection state
         self.patterns = []
@@ -68,7 +67,7 @@ class LogProcessor:
         self.time_per_keyword = {}
         self.kw_time_lock = Lock()
 
-        self.load_config_variables(config, target_config)
+        self.load_config_variables(config, self.target_config)
 
         # If multi-line mode is on, find starting pattern in logs
         if self.multi_line_mode is True:
@@ -88,23 +87,24 @@ class LogProcessor:
         """
         Normalize and return a list of keyword/regex dicts from various input types. 
         """
+        # TODO: is this function still necessary?
         returned_keywords = []
         for item in keywords:
             if isinstance(item, str):
                 returned_keywords.append(({"keyword": item}))
                 continue
-            if isinstance(item, (KeywordItem, RegexItem, KeywordGroup)):
-                item = item.model_dump(exclude_none=True)
-            if isinstance(item, dict) and "keyword_group" in item:
-                item["keyword_group"] = tuple(item["keyword_group"])
-                returned_keywords.append(item)
-            elif isinstance(item, dict) and ("keyword" in item or "regex" in item):
+            # if isinstance(item, (KeywordItem, RegexItem, KeywordGroup)):
+            #     item = item.model_dump(exclude_none=True)
+            # if isinstance(item, dict) and "keyword_group" in item:
+            #     item["keyword_group"] = tuple(item["keyword_group"])
+            #     returned_keywords.append(item)
+            elif isinstance(item, dict) and any(k in item for k in ["keyword", "regex", "keyword_group"]):
                 returned_keywords.append(item)
             else:
                 self.logger.debug(f"Did not find correct item type for item: {item}")
         return returned_keywords
 
-    def load_config_variables(self, config: GlobalConfig, target_config):
+    def load_config_variables(self, config: GlobalConfig, target_config: "EffectiveTargetConfig"):
         """
         Load and merge configuration for global and container-specific keywords and settings.
         Called on initialization and when reloading config.
@@ -116,14 +116,13 @@ class LogProcessor:
         self.config = config
         self.target_config = target_config
         self.time_per_keyword = {}
-        tgt_cnf = self.target_config.model_dump(exclude_none=True) if self.target_config else {}
+        self.target_config_dict = self.target_config.model_dump(exclude_none=True) if self.target_config else {}
 
         # Merge global and target-specific keywords
-        self.keywords = self._get_keywords(tgt_cnf.get("keywords", []))
-        self.keywords.extend(self._get_keywords(self.config.global_keywords.keywords))
+        self.keywords = self._get_keywords(self.target_config_dict.get("keywords", []))
 
         # Merge message configuration with precedence: target_config > global_config
-        self.target_modular_settings = merge_modular_settings(tgt_cnf, config.settings.model_dump(exclude_none=True))
+        # self.target_modular_settings = merge_modular_settings(tgt_cnf, config.settings.model_dump(exclude_none=True))
         self.multi_line_mode = config.settings.multi_line_entries
         self.start_flush_thread_if_needed()
 
@@ -260,8 +259,8 @@ class LogProcessor:
         def get_keyword_setting(key: str, default: Any = None) -> Any:
             if keyword_dict.get(key) is not None:
                 return keyword_dict[key]
-            elif self.target_modular_settings.get(key) is not None:
-                return self.target_modular_settings[key]
+            elif val := self.target_config_dict.get(key, None) is not None:
+                return val
             return default
 
         def cooldown_is_expired(key: str | tuple[str, ...], notification_cooldown: int, ignore_keyword_time: bool = False) -> bool:
@@ -279,6 +278,13 @@ class LogProcessor:
             with self.kw_time_lock:
                 self.time_per_keyword[key] = time.time()
 
+        def make_group_key(items: tuple[dict]) -> tuple:
+            return tuple[str, ...](
+                f"{key}: {val}"for d in items for key, val in d.items()
+            )
+
+
+
         notification_cooldown = get_keyword_setting("notification_cooldown", 10)
         regex_case_sensitive = get_keyword_setting("regex_case_sensitive", False)
 
@@ -295,10 +301,17 @@ class LogProcessor:
                     set_keyword_time(keyword)
                     return keyword
         elif keyword_group := keyword_dict.get("keyword_group"):
-            if cooldown_is_expired(keyword_group, notification_cooldown, ignore_keyword_time):
-                if all(keyword.lower() in log_line.lower() for keyword in keyword_group):
-                    set_keyword_time(keyword_group)
-                    return keyword_group
+            key = make_group_key(keyword_group)
+            if cooldown_is_expired(key, notification_cooldown, ignore_keyword_time):
+                for item in keyword_group:
+                    if item.get("keyword"):
+                        if item["keyword"].lower() in log_line.lower():
+                            set_keyword_time(key)
+                            return key
+                    elif item.get("regex"):
+                        if re.search(item["regex"], log_line, re.IGNORECASE if not regex_case_sensitive else 0):
+                            set_keyword_time(key)
+                            return key
         else:
             self.logger.error(f"No keyword or regex found for {keyword_dict}")
         return None
@@ -315,23 +328,26 @@ class LogProcessor:
         for keyword_dict in self.keywords:
             found = self._search_keyword(log_line, keyword_dict)
             if found:
-                keyword_level_config = merge_with_precedence(keyword_level_config, keyword_dict, list_union=True)
+                keyword_level_config = merge_with_precedence(keyword_level_config, keyword_dict, list_union=True, dict_merge=True)
                 keywords_found.append(found)
         if not keywords_found:
             return
             
         # When an excluded keyword is found, the log line gets ignored and the function returns
-        if ek := (keyword_level_config.get("excluded_keywords") or []) + (self.target_modular_settings.get("excluded_keywords") or []):
+        if ek := (keyword_level_config.get("excluded_keywords") or []) + (self.target_config_dict.get("excluded_keywords") or []):
             for keyword in self._get_keywords(ek):
                 found = self._search_keyword(log_line, keyword, ignore_keyword_time=True)
                 if found:
                     self.logger.debug(f"Keyword(s) '{keywords_found}' found in '{self.target_name}' but ignored because excluded keyword '{found}' was found")
                     return
-
-        merged_modular_settings = merge_modular_settings(keyword_level_config, self.target_modular_settings)
+        # trigger_context = TriggerContext(
+        #     trigger=keyword_level_config,
+        #     target_config=self.target_config,
+        # )
+        trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
         formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(log_line.splitlines()) + "\n   -----------------------"
         self.logger.info(f"The following keywords were found in {self.target_name}: {keywords_found}."
-                    + (f" (A Log FIle will be attached)" if merged_modular_settings.get("attach_logfile") else "")
+                    + (f" (A Log FIle will be attached)" if trigger_context.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )
 
@@ -349,8 +365,7 @@ class LogProcessor:
         process_trigger(
             logger=self.logger,
             config=self.config,
-            modular_settings=merged_modular_settings,
-            trigger_level_config=keyword_level_config,
+            trigger_context=trigger_context,
             monitored_target=self.monitored_target,
             notification_context=notification_context,
         )

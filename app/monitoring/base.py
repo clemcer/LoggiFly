@@ -2,13 +2,31 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 import threading
-
+from pydantic import model_validator
 from constants import MonitorType
 from typing import TYPE_CHECKING
-
+from config.models import (
+    KeywordBase,
+    ContainerEventBase,
+    RootDefaultsConfig,
+    _validation_ctx,
+    SKIP_CONTAINER_ACTION_VALIDATION,
+)
 if TYPE_CHECKING:
-    from config.config_model import ContainerConfig, SwarmServiceConfig
     from docker_monitoring.helpers import ContainerActionResult
+
+class EffectiveTargetConfig(KeywordBase, ContainerEventBase, RootDefaultsConfig):
+    # container_events
+    # keywords
+    # **all defaults
+    @model_validator(mode="wrap")
+    @classmethod
+    def _inject_ctx(cls, data, handler):
+        token = _validation_ctx.set({SKIP_CONTAINER_ACTION_VALIDATION: True})
+        try:
+            return handler(data)
+        finally:
+            _validation_ctx.reset(token)
 
 @dataclass
 class SourceMetadata:
@@ -44,8 +62,8 @@ class MonitoredTarget(ABC):
 
     @property
     @abstractmethod
-    def target_config(self) -> "ContainerConfig | SwarmServiceConfig":
-        """Configuration object (ContainerConfig, SwarmServiceConfig)."""
+    def target_config(self) -> EffectiveTargetConfig:
+        """Configuration object."""
         ...
 
     @property

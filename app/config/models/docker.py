@@ -2,19 +2,20 @@ from pydantic import (
     field_validator,
     model_validator,
     Field,
+    ConfigDict,
 )
-from typing import Literal, Optional, List, ClassVar, Annotated
-from constants import MonitorType, SUPPORTED_CONTAINER_EVENTS, SUPPORTED_CONTAINER_ACTIONS
+from typing import Literal, Optional, List, Annotated
+from constants import MonitorType, SUPPORTED_CONTAINER_EVENTS
 from config.models.base import (
     BaseConfigModel,
-    OliveTinAction,
     KeywordBase,
     ModularDefaultsConfig,
+    TriggerActionsBase,
+    _validation_ctx,
 )
 from config.helpers import (
-    validate_and_filter_olivetin_actions,
     validate_container_events,
-    generate_id_for_policies,
+    generate_id_for_rules,
     convert_shorthand_to_match,
 )
 
@@ -27,47 +28,21 @@ class ScopeConfig(BaseConfigModel):
     hosts: Optional[List[str]] = None
 
 
-class ContainerEventConfig(ModularDefaultsConfig):
+class ContainerEventConfig(TriggerActionsBase):
     event: Literal[*SUPPORTED_CONTAINER_EVENTS] # type: ignore
-    container_action: Optional[str] = None
-    olivetin_actions: Optional[List[OliveTinAction]] = None
-
-    @field_validator("container_action")
-    def validate_container_action(cls, v):
-        """
-        Invariant check: ensures the container action is valid.
-        MonitorType specific validation is done in the instantiating class that has the cls._MONITOR_TYPE variable context.
-        Pre-validation in validate_container_events() should filter out invalid items before they reach here.
-        """
-        if v and v.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
-            raise ValueError(f"Error in config in field 'container_events': Invalid container action ('{v}'). Must be one of {SUPPORTED_CONTAINER_ACTIONS}")
-        return v    
-    
-    @model_validator(mode="before")
-    def validate_olivetin(cls, data: dict) -> dict:
-        if data and isinstance(data, dict):
-            return validate_and_filter_olivetin_actions(data)
-        return data
 
 
 class ContainerEventBase(BaseConfigModel):
-    _MONITOR_TYPE: ClassVar[MonitorType | None] = None
-
     container_events: Optional[List[ContainerEventConfig]] = None
 
     @model_validator(mode="before")
     def validate_container_events(cls, data: dict) -> dict:
-        """
-        Validate container events and container actions.
-        container_actions are validated here because the cls._MONITOR_TYPE variable from the instantiating class is used.
-        """
-        assert cls._MONITOR_TYPE is not None, "Internal Error: cls._MONITOR_TYPE is not set in instantiating class"
         if "container_events" in data and isinstance(data["container_events"], list):
-            data["container_events"] = validate_container_events(data["container_events"], cls._MONITOR_TYPE)
+            data["container_events"] = validate_container_events(data["container_events"])
         return data
 
 
-class PolicyBase(KeywordBase, ContainerEventBase, ModularDefaultsConfig):
+class RuleBase(KeywordBase, ContainerEventBase, ModularDefaultsConfig):
     id: Optional[str] = None # auto-generated in SourceConfig class if missing
     enabled: bool = True
     scope: Optional[ScopeConfig] = None
@@ -86,12 +61,10 @@ class ContainerMatch(BaseConfigModel):
     exclude: Optional[ContainerMatchCriteria] = None
 
 
-class ContainerPolicy(PolicyBase):
+class ContainerRule(RuleBase):
 
-    _MONITOR_TYPE: ClassVar[MonitorType | None] = MonitorType.CONTAINER
-    
-    container_name: Optional[str] = None # shorthand
-    match: Optional[ContainerMatch] = None
+    container_name: Optional[str] = None # shorthand is converted to match
+    match: ContainerMatch
 
     @model_validator(mode="before")
     def convert_shorthand_to_match(cls, data: dict):
@@ -101,17 +74,24 @@ class ContainerPolicy(PolicyBase):
 
 class ContainerSourceConfig(KeywordBase, ContainerEventBase):
 
-    _MONITOR_TYPE: ClassVar[MonitorType | None] = MonitorType.CONTAINER
-
     scope: Optional[ScopeConfig] = None
     never_monitor: Optional[ContainerMatchCriteria] = None
     defaults: Optional[ModularDefaultsConfig] = None
-    policies: Optional[List[ContainerPolicy]] = None
-    overlays: Optional[List[ContainerPolicy]] = None
+    rules: Optional[List[ContainerRule]] = None
+    overlays: Optional[List[ContainerRule]] = None
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _inject_ctx(cls, data, handler):
+        token = _validation_ctx.set({"monitor_type": MonitorType.CONTAINER})
+        try:
+            return handler(data)
+        finally:
+            _validation_ctx.reset(token)
 
     @model_validator(mode="before")
     def generate_ids_if_missing(cls, data: dict) -> dict:
-        return generate_id_for_policies(data)
+        return generate_id_for_rules(data)
 
 
 # ================================================
@@ -129,18 +109,17 @@ class SwarmMatchCriteria(BaseConfigModel):
                 raise ValueError("You have to set at least one of 'stack_names' or 'service_names'.")
         return data
 
-
 class SwarmMatch(BaseConfigModel):
     include: SwarmMatchCriteria
     exclude: Optional[SwarmMatchCriteria] = None
 
-class SwarmPolicy(PolicyBase):
+class SwarmRule(RuleBase):
 
-    _MONITOR_TYPE: ClassVar[MonitorType | None] = MonitorType.SWARM
+    # shorthands are converted to match
+    stack_name: Optional[str] = None
+    service_name: Optional[str] = None
 
-    stack_name: Optional[str] = None # shorthand
-    service_name: Optional[str] = None # shorthand
-    match: Optional[SwarmMatch] = None
+    match: SwarmMatch
 
     @model_validator(mode="before")
     def convert_shorthand_to_match(cls, data: dict) -> dict:
@@ -149,16 +128,35 @@ class SwarmPolicy(PolicyBase):
 
 class SwarmSourceConfig(KeywordBase, ContainerEventBase):
 
-    _MONITOR_TYPE: ClassVar[MonitorType | None] = MonitorType.SWARM
-
     scope: Optional[ScopeConfig] = None
     never_monitor: Optional[SwarmMatchCriteria] = None
     defaults: Optional[ModularDefaultsConfig] = None
-    policies: Optional[List[SwarmPolicy]] = None
-    overlays: Optional[List[SwarmPolicy]] = None
+    rules: Optional[List[SwarmRule]] = None
+    overlays: Optional[List[SwarmRule]] = None
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _inject_ctx(cls, data, handler):
+        token = _validation_ctx.set({"monitor_type": MonitorType.SWARM})
+        try:
+            return handler(data)
+        finally:
+            _validation_ctx.reset(token)
 
     @model_validator(mode="before")
     def generate_ids_if_missing(cls, data: dict) -> dict:
-        return generate_id_for_policies(data)
+        return generate_id_for_rules(data)
 
 
+class LabelConfig(KeywordBase, ContainerEventBase, ModularDefaultsConfig):
+    model_config = ConfigDict(extra="ignore")
+
+    # these should not be logged as missing fields (via validator function in BaseConfigModel)
+    monitor: Optional[bool] = None
+    ignore_config: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def unset_fields(self) -> 'LabelConfig':
+        self.monitor = None
+        self.ignore_config = None
+        return self

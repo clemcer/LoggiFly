@@ -1,6 +1,7 @@
 from pydantic import (
     BaseModel,
     ConfigDict,
+    field_validator,
 )
 from typing import Optional, Literal
 from config.models.base import (
@@ -12,13 +13,18 @@ from config.models.base import (
 from config.models.docker import ContainerSourceConfig, SwarmSourceConfig
 
 
-class GlobalConfigV2(BaseConfigModel):
-    # model_config = ConfigDict(extra="ignore") 
-
-    version: Literal[2] = 2 # TODO: force user setting version or not?
-    defaults: Optional[RootDefaultsConfig] = RootDefaultsConfig()
+class GlobalConfig(BaseConfigModel):
+    version: Literal[2] = 2
     containers: Optional[ContainerSourceConfig] = None
     swarm: Optional[SwarmSourceConfig] = None
-    notifications: Optional[NotificationsConfig] = None
-    settings: Optional[SettingsConfig] = SettingsConfig()
-
+    notifications: NotificationsConfig = NotificationsConfig()
+    defaults: RootDefaultsConfig = RootDefaultsConfig()
+    settings: SettingsConfig = SettingsConfig()
+    
+    @field_validator("version", mode="before")
+    def ensure_int_literal(cls, v):
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str) and v.isdigit():
+            return int(v)
+        raise ValueError("Version must be an integer or a string that can be converted to an integer")

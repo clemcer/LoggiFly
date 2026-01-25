@@ -1,13 +1,29 @@
 from dataclasses import dataclass
 import logging
-from config.config_model import ModularSettings
+import os
+
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class LogAttachment:
     content: str
     file_name: str
+
+
+def get_env_var(key: str, prefix: str = "LOGGIFLY_", fallback_value: str | None = None) -> str | None:
+    # TODO: use this function for all env vars not just config related
+    val = os.getenv(f"{prefix}{key}")
+    if val:
+        if not val.strip():
+            return None
+        return val
+    val = os.getenv(key)
+    if val is not None:
+        return val
+    return fallback_value
+
 
 def _union_lists(first: list, second: list) -> list:
     """Return union preserving order with `first` items first."""
@@ -24,7 +40,7 @@ def merge_with_precedence(
     *,
     keys: list[str] | tuple[str, ...] | None = None,
     list_union: bool = True,
-    dict_merge: bool = False,
+    dict_merge: bool = True,
 ) -> dict:
     """
     Generic precedence merge helper used for modular settings and notifications.
@@ -43,7 +59,7 @@ def merge_with_precedence(
             val = f_val
         else:
             if list_union and isinstance(p_val, list) and isinstance(f_val, list):
-                val = _union_lists(p_val, f_val)
+                val = _union_lists(f_val, p_val) # in v2 last override first
             elif dict_merge and isinstance(p_val, dict) and isinstance(f_val, dict):
                 val = merge_with_precedence(p_val, f_val, list_union=list_union, dict_merge=dict_merge)
             else:
@@ -55,10 +71,18 @@ def merge_with_precedence(
     return merged
 
 
-def merge_modular_settings(precedence: dict, fallback: dict) -> dict:
+def merge_trigger_context(precedence: dict, fallback: dict) -> dict:
     """Wrapper that applies schema keys from ModularSettings."""
-    possible_keys = tuple(ModularSettings.model_fields.keys())
-    return merge_with_precedence(precedence, fallback, keys=possible_keys, list_union=True)
+    from config.models.base import TriggerActionsBase
+    possible_keys = tuple(TriggerActionsBase.model_fields.keys())
+    return merge_with_precedence(precedence, fallback, keys=possible_keys, list_union=True, dict_merge=True)
+
+
+def merge_defaults(precedence: dict, fallback: dict) -> dict:
+    """Merge defaults with precedence."""
+    from config.models.base import RootDefaultsConfig
+    possible_keys = tuple(RootDefaultsConfig.model_fields.keys())
+    return merge_with_precedence(precedence, fallback, keys=possible_keys, list_union=True, dict_merge=True)
 
 
 def convert_to_int(val, fallback_value: int = 0, min_value: int = 0) -> int:

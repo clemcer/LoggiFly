@@ -2,12 +2,17 @@ import re
 from typing import Any
 import logging
 import os
-from pydantic import ValidationError
-
+from pydantic import ValidationError, SecretStr
+import yaml
 from constants import MonitorType, SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_CONTAINER_EVENTS
+from utils import get_env_var
 
 def strict_config_validation() -> bool:
-    return os.getenv("LOGGIFLY_STRICT_CONFIG", "true").lower() == "true" # TODO: think about default
+    val = get_env_var("STRICT_CONFIG")
+    if val is None:
+        return True
+    return val.lower() == "true" # TODO: think about default
+
 
 def handle_error(message: str, consequence: str | None = None):
     if strict_config_validation():
@@ -30,12 +35,49 @@ def format_pydantic_error(e: ValidationError) -> str:
         error_messages.append(f"Error in config in field '{location}': {msg}")
     return "\n".join(error_messages)
 
-def stringify_numbers(data: dict) -> dict:                            
-    """Recursively convert ints/floats to strings in a config dict.                                            
-                                                        
-    Safe because Pydantic coerces strings back to int/float where needed,                                 
-    but won't coerce int to str.                        
-    """                                                 
+
+def get_pretty_yaml_config(config, top_level_key=None):
+    """
+    Convert a Pydantic config object to a pretty-printed YAML string.
+    
+    Args:
+        config: Pydantic model instance
+        top_level_key: Optional key to wrap the config in
+        
+    Returns:
+        str: Pretty-formatted YAML string
+    """
+    config_dict = prettify_config_dict(config.model_dump(
+        exclude_none=True, 
+        exclude_defaults=False, 
+        exclude_unset=False,
+    ))
+    if top_level_key:
+        config_dict = {top_level_key: config_dict}
+    return yaml.dump(config_dict, default_flow_style=False, sort_keys=False, indent=4)
+
+
+def prettify_config_dict(data):
+    """
+    Recursively format config dict for display, masking secrets and ordering keys for readability.
+    """
+    if isinstance(data, dict):
+        # Put regex/keyword keys first for better readability
+        priority_keys = [k for k in ("regex", "keyword", "keyword_group", "event", "id", "enabled") if k in data]
+        if priority_keys:
+            rest_keys = [k for k in data.keys() if k not in priority_keys]
+            ordered_dict = {k: data[k] for k in priority_keys + rest_keys}
+            return {k: prettify_config_dict(v) for k, v in ordered_dict.items()}
+        return {k: prettify_config_dict(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [prettify_config_dict(item) for item in data]
+    elif isinstance(data, SecretStr):
+        return "**********"  
+    else:
+        return data
+
+
+def stringify_numbers(data) -> Any:                            
     if isinstance(data, dict):                          
         return {k: stringify_numbers(v) for k, v in data.items()}                                           
     elif isinstance(data, list):                        
@@ -45,6 +87,17 @@ def stringify_numbers(data: dict) -> dict:
     else:                                               
         return data
 
+
+def discriminate_keyword_type(v: Any):
+    if isinstance(v, dict):
+        return next(key for key in ["keyword", "regex", "keyword_group"] if key in v)
+    return next(key for key in ["keyword", "regex", "keyword_group"] if hasattr(v, key))
+
+
+
+# ===============================
+# Validation functions
+# ===============================
 
 def validate_regex(v):
     """
@@ -71,47 +124,39 @@ def get_kw_or_rgx(item):
     return "unknown"
 
 
-def validate_keywords(keywords: list[Any], monitor_type: MonitorType) -> list[Any]:
+def validate_keywords(keywords: list[Any]) -> list[Any]:
     converted = []
     for idx, item in enumerate(keywords):
         if isinstance(item, dict):
             keys = list(item.keys())
-            # Validate required keys
+
             if len(set(keys) & {"keyword", "regex", "keyword_group"}) != 1:
                 handle_error(f"keywords.{idx}: You have to set exactly one of 'keyword', 'regex' or 'keyword_group' as a key: {item}.")
                 continue
+
             if "keyword" in item:
-                kind = "keyword"
+                pass
             elif "regex" in item:
                 if not validate_regex(item["regex"]):
                     handle_error(f"keywords.{idx}.regex: Invalid regex: {item['regex']}.")
                     continue
-                kind = "regex"
             elif "keyword_group" in item:
                 if not isinstance(item["keyword_group"], list):
                     handle_error(f"keywords.{idx}.keyword_group: You have to set 'keyword_group' as a list: {item['keyword_group']}.")
                     continue
-                kind = "keyword_group"
             else:
                 handle_error(f"keywords.{idx}: You have to set 'keyword', 'regex' or 'keyword_group' as a key: {item}.")
                 continue
-            # Validate and convert fields
-            skip_key = False
-            for key in keys:
-                if key == "container_action":
-                    valid, error = is_valid_container_action(item[key], monitor_type=monitor_type)
-                    if not valid:
-                        handle_error(f"keywords.{idx}.{key}: Invalid action: {error}")
-                        skip_key = True
-            if skip_key:
-                continue
-            converted.append({"kind": kind, **item})
+            converted.append(item)
         elif isinstance(item, (str, int)):
-            converted.append({"kind": "keyword", "keyword": str(item)})
+            converted.append({
+                "keyword": str(item),
+            })
         else:
             handle_error(f"keywords.{idx}: Invalid type. Must be a string or dict: {item}.")
             continue
     return converted
+
 
 def validate_simple_keywords(keywords: list[Any], field_name: str) -> list[Any]:
     """
@@ -142,7 +187,8 @@ def validate_simple_keywords(keywords: list[Any], field_name: str) -> list[Any]:
             continue
     return converted
 
-def validate_container_events(container_events: list[Any], monitor_type: MonitorType) -> list[Any]:
+
+def validate_container_events(container_events: list[Any]) -> list[Any]:
     converted = []
     for idx, item in enumerate(container_events):
         if isinstance(item, str):
@@ -156,32 +202,32 @@ def validate_container_events(container_events: list[Any], monitor_type: Monitor
             if not item.get("event") in SUPPORTED_CONTAINER_EVENTS:
                 handle_error(f"container_events.{idx}: '{item}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                 continue
-            if item.get("container_action"):
-                valid, error = is_valid_container_action(item["container_action"], monitor_type=monitor_type)
-                if not valid:
-                    handle_error(f"container_events.{idx}: Invalid action ('{item['container_action']}') for event '{item['event']}': {error}")
-                    continue # TODO: continue or put value None?
             converted.append(item)
         else:
             handle_error(f"container_events.{idx}: '{item}' is not a string or dict.")
     return converted
 
 
-def is_valid_container_action(value, monitor_type: MonitorType) -> tuple[bool, str]:
+def validate_container_action(value, monitor_type: MonitorType | None) -> str | None:
     if not isinstance(value, str):
-        return False, "container action must be a string"
+        handle_error("container action must be a string")
+        return None
     if monitor_type == MonitorType.SWARM:
         if len(value.split('@')) < 2:
-            return False, "container_actions on swarm services are not allowed. Action must be in the format 'action@container_name'"
+            handle_error("container_actions on swarm services are not allowed. Actions under the swarm block must have a target and be in the format 'action@container_name'")
+            return None
     elif monitor_type == MonitorType.CONTAINER:
         pass
     else:
-        return False, "Container Action not allowed for monitor type: " + monitor_type.value
+        handle_error("container_action not allowed for monitor type: " + (monitor_type.value if isinstance(monitor_type, MonitorType) else "monitor type is not set"))
+        return None
     if not 0 < len(value.split('@')) < 3:
-        return False, "container action must be in the format 'action@hostname'"
+        handle_error("container_action must be in the format 'action' or 'action@hostname'")
+        return None
     if value.split('@')[0] not in SUPPORTED_CONTAINER_ACTIONS:
-        return False, "container action must be one of " + ", ".join(SUPPORTED_CONTAINER_ACTIONS)
-    return True, ""
+        handle_error("container_action must be one of " + ", ".join(SUPPORTED_CONTAINER_ACTIONS))
+        return None
+    return value
 
 
 def validate_action_cooldown(v):
@@ -199,6 +245,7 @@ def validate_action_cooldown(v):
         handle_error("Action cooldown must be at least 10 seconds.", "Setting to 10 seconds")
         return 10
     return v
+
 
 def validate_olivetin_arguments(arguments: list[Any]) -> list[Any] | None:
     filtered_args = []
@@ -236,6 +283,7 @@ def validate_and_filter_olivetin_actions(data: dict) -> dict:
         data.pop("olivetin_action_id")
     return data
 
+
 def validate_ntfy_priority(v):
     """
     Validate and normalize the ntfy priority value. 
@@ -245,16 +293,16 @@ def validate_ntfy_priority(v):
             options = ["max", "urgent", "high", "default", "low", "min"]
             if v not in options:
                 handle_error(f"Ntfy priority:'{v}'. Only 'max', 'urgent', 'high', 'default', 'low', 'min' or integer between 1-5 are allowed.", "Using default: '3'")
-                return None
+                return 3
         try:
             v = int(v)
         except ValueError:
             handle_error(f"Ntfy priority: Must be an integer. '{v}' is not allowed.", "Using default: '3'")
-            return None
+            return 3
     if isinstance(v, int):
         if not 1 <= int(v) <= 5:
             handle_error(f"Ntfy priority: Must be between 1-5, '{v}' is not allowed.", "Using default: '3'")
-            return None
+            return 3
     return v
 
 
@@ -281,16 +329,16 @@ def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
         filtered_actions.append(raw)
     return filtered_actions
 
-def generate_id_for_policies(data: Any) -> Any:
+
+def generate_id_for_rules(data: Any) -> Any:
     if isinstance(data, dict):
-        for idx, policy in enumerate(data.get("policies", [])):
-            if policy.get("id") is None:
-                policy["id"] = f"policy_{idx}"
+        for idx, rule in enumerate(data.get("rules", []), 1):
+            if rule.get("id") is None:
+                rule["id"] = f"rule-{idx}"
         for idx, overlay in enumerate(data.get("overlays", [])):                                        
             if overlay.get("id") is None:                 
-                overlay["id"] = f"overlay_{idx}"          
+                overlay["id"] = f"overlay-{idx}"
     return data
-
 
 
 def convert_shorthand_to_match(data: dict, shorthand_mapping: dict[str, str]) -> dict:                                           

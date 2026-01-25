@@ -13,3 +13,4 @@ tests/
 requirements-dev.txt
 release-prep/
 v2-config/
+archive/
