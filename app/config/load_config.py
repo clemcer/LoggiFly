@@ -124,7 +124,6 @@ def load_config(path="/config/config.yaml"):
     config_path = None
     yaml_config = None
     error_messages = []
-    # Try to load YAML config from available paths
     if os.path.isfile(path):
         config_path = path
         try:

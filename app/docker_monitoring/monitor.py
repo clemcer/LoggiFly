@@ -56,12 +56,12 @@ class MonitoredContainerContext:
 
         Args:
             snapshot: Container metadata snapshot
-            # config_key: Configuration key (container/service name)
             target_config: Effective target configuration object
-            config_via_labels: Whether config came from Docker labels
+            decision: MonitorDecision object
+            host_identifier: Host identifier (swarm manager/worker or hostname)
+            hostname: Hostname
         """
         self.snapshot = snapshot
-        # self.config_key = config_key
         self.target_config = target_config
         self.target_config_dict = target_config.model_dump(exclude_none=True)
         self.decision = decision
@@ -325,12 +325,11 @@ class DockerLogMonitor:
 
         # Start monitoring
         target_name = snapshot.target_name
-        self.logger.debug(f"Monitoring {target_name}: {decision.reason}\nMatched rules: {decision.matched_rules}\nMatched overlays: {decision.matched_overlays}")
-        # if decision.config_via_labels:
-        #     self.logger.info(
-        #         f"Monitoring {target_name} via docker labels.\
-        #         \nConfig:\n{get_pretty_yaml_config(decision.target_config, top_level_key=target_name)}"
-        #         )
+        self.logger.debug(
+            f"Monitoring {target_name}: {decision.reason}\n"
+            f"Matched rules: {decision.matched_rules}\n"
+            f"Matched overlays: {decision.matched_overlays}"
+        )
 
         container_context = self._prepare_monitored_container_context(container, snapshot, decision)
         container_context.currently_configured = True
@@ -344,7 +343,6 @@ class DockerLogMonitor:
         decision: MonitorDecision
         ) -> MonitoredContainerContext:
         """Prepare or reuse monitoring context for a container."""
-        # assert decision.config_key is not None, "config_key must be set when monitoring"
         assert decision.target_config is not None, "target_config must be set when monitoring"
         assert decision.matched_via_labels is not None, "config_via_labels must be set when monitoring"
 
@@ -357,7 +355,6 @@ class DockerLogMonitor:
             else:
                 if not self._stop_and_close_stream(ctx, wait_for_thread=True):
                     self.logger.warning(f"Old monitoring thread for {snapshot.target_name} might not have been closed.")
-                # time.sleep(0.5) # TODO: test this more. migth be needed to avoid race conditions.
                 self.logger.debug(f"{snapshot.target_name}: Re-Using old context")
                 self._registry.update_id(ctx.container_id, container.id)
                 ctx.snapshot = snapshot

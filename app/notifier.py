@@ -280,9 +280,10 @@ def send_notification(
     """
     message = message.replace(r"\n", "\n").strip() if message else ""
     nc = config.notifications.model_dump(exclude_none=True)
-    ntfy_config = get_notification_config(trigger_context or {}, nc.get("ntfy", {}), NTFY_PREFIX, NTFY_KEYS)
-    apprise_url = get_notification_config(trigger_context or {}, nc.get("apprise", {}), APPRISE_PREFIX, APPRISE_KEYS).get("url")
-    webhook_config = get_notification_config(trigger_context or {}, nc.get("webhook", {}), WEBHOOK_PREFIX, WEBHOOK_KEYS)
+    trigger_context = trigger_context or {}
+    ntfy_config = get_notification_config(trigger_context, nc.get("ntfy") or {}, NTFY_PREFIX, NTFY_KEYS)
+    apprise_url = get_notification_config(trigger_context, nc.get("apprise") or {}, APPRISE_PREFIX, APPRISE_KEYS).get("url")
+    webhook_config = get_notification_config(trigger_context, nc.get("webhook") or {}, WEBHOOK_PREFIX, WEBHOOK_KEYS)
 
     # Send ntfy notification if configured
     if ntfy_config and ntfy_config.get("url") and ntfy_config.get("topic"):

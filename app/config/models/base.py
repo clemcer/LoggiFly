@@ -187,6 +187,7 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     hide_full_regex: Optional[bool] = None
     regex_case_sensitive: Optional[bool] = None
     disable_notifications: Optional[bool] = None
+    merge_matches: Optional[bool] = None
 
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     attach_logfile: bool = False
@@ -196,6 +197,7 @@ class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     hide_full_regex: bool = False
     regex_case_sensitive: bool = True
     disable_notifications: bool = False
+    merge_matches: bool = False
 
 
 # ================================================
