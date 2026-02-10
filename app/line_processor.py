@@ -15,6 +15,64 @@ from trigger import process_trigger
 from config.models import GlobalConfig
 from monitoring import MonitoredTarget, EffectiveTargetConfig
 
+class KeywordTracker:
+    """
+    Thread-safe tracker for keyword match state.
+    Handles both simple cooldown (single last-trigger timestamp) and
+    threshold-based triggering (sliding window of match timestamps).
+    """
+
+    def __init__(self, logger):
+        self.logger = logger
+        self._lock = Lock()
+        self._last_trigger: dict[str | tuple, float] = {}
+        self._match_history: dict[str | tuple, list[float]] = {}
+
+    def is_on_cooldown(self, key: str | tuple, cooldown: int) -> bool:
+        """Check if the keyword is still within its notification_cooldown period."""
+        with self._lock:
+            last = self._last_trigger.get(key, 0)
+            return (time.time() - last) < cooldown
+
+    def record_match(self, key: str | tuple, trigger_on: dict | None) -> bool:
+        """
+        Record a keyword match and determine whether to trigger.
+
+        Without trigger_on: triggers immediately (returns True) and stores the current time.
+        With trigger_on: adds the timestamp to a sliding window and only triggers
+        when `count` matches have occurred within the last `timeframe` seconds.
+        On trigger the match history is cleared so the count starts fresh.
+
+        Returns:
+            True if the trigger should fire, False if the match was recorded
+            but the threshold has not been reached yet.
+        """
+        now = time.time()
+        with self._lock:
+            if trigger_on is None:
+                self._last_trigger[key] = now
+                return True
+
+            count = trigger_on["count"]
+            timeframe = trigger_on["timeframe"]
+            assert isinstance(count, int) and isinstance(timeframe, int), "count and timeframe must be integers"
+
+            history = self._match_history.setdefault(key, [])
+            history.append(now)
+
+            # Prune timestamps outside the sliding window
+            cutoff = now - timeframe
+            history[:] = [t for t in history if t > cutoff]
+
+            if len(history) >= count:
+                self._last_trigger[key] = now
+                history.clear()
+                return True
+            self.logger.debug(f"Keyword '{key}' matched {len(history)} times in the last {timeframe} seconds. {count - len(history)} more matches needed to trigger.")
+
+            return False
+
+
 class LogProcessor:
     """
     Processes Docker container log lines to:
@@ -64,8 +122,7 @@ class LogProcessor:
 
         # These are updated in load_config_variables()
         self.multi_line_mode = False
-        self.time_per_keyword = {}
-        self.kw_time_lock = Lock()
+        self.keyword_tracker = KeywordTracker(logger=self.logger)
 
         self.load_config_variables(config, self.target_config)
 
@@ -94,7 +151,6 @@ class LogProcessor:
         """
         self.config = config
         self.target_config = target_config
-        self.time_per_keyword = {}
         self.target_config_dict = self.target_config.model_dump(exclude_none=True) if self.target_config else {}
 
         # Merge global and target-specific keywords
@@ -229,8 +285,10 @@ class LogProcessor:
     def _search_keyword(self, log_line: str, keyword_dict: dict, ignore_keyword_time: bool = False) -> str | tuple | None:
         """
         Search for keyword or regex in log_line. Enforce notification cooldown unless ignore_keyword_time is True.
+        For keywords with trigger_on config, matches are accumulated and only trigger
+        when the threshold count is reached within the timeframe.
         Returns:
-            str or None: The matched keyword/regex or None if no match or on cooldown
+            str or None: The matched keyword/regex or None if no match, on cooldown, or threshold not reached
         """
         def get_keyword_setting(key: str, default: Any = None) -> Any:
             if keyword_dict.get(key) is not None:
@@ -239,21 +297,6 @@ class LogProcessor:
                 return val
             return default
 
-        def cooldown_is_expired(key: str | tuple[str, ...], notification_cooldown: int, ignore_keyword_time: bool = False) -> bool:
-            """check if the keyword is on cooldown"""
-            if ignore_keyword_time:
-                return True
-            with self.kw_time_lock:
-                if time.time() - self.time_per_keyword.get(key, 0) >= int(notification_cooldown):
-                    return True
-                else:
-                    return False
-
-        def set_keyword_time(key: str | tuple[str, ...]):
-            """set the keyword time"""
-            with self.kw_time_lock:
-                self.time_per_keyword[key] = time.time()
-
         def make_group_key(items: tuple[dict]) -> tuple:
             return tuple[str, ...](
                 f"{key}: {val}"for d in items for key, val in d.items()
@@ -261,31 +304,34 @@ class LogProcessor:
 
         notification_cooldown = get_keyword_setting("notification_cooldown", 10)
         regex_case_sensitive = get_keyword_setting("regex_case_sensitive", False)
+        trigger_on = keyword_dict.get("trigger_on") if not ignore_keyword_time else None
 
         if regex := keyword_dict.get("regex"):
-            if cooldown_is_expired(regex, notification_cooldown, ignore_keyword_time):
+            if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(regex, notification_cooldown):
                 match = re.search(regex, log_line, re.IGNORECASE if not regex_case_sensitive else 0)
                 if match:
-                    set_keyword_time(regex)
-                    hide_pattern = get_keyword_setting("hide_regex_in_title", False)
-                    return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
+                    if self.keyword_tracker.record_match(regex, trigger_on):
+                        hide_pattern = get_keyword_setting("hide_regex_in_title", False)
+                        return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
         elif keyword := keyword_dict.get("keyword"):
-            if cooldown_is_expired(keyword, notification_cooldown, ignore_keyword_time):
+            if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(keyword, notification_cooldown):
                 if keyword.lower() in log_line.lower():
-                    set_keyword_time(keyword)
-                    return keyword
+                    if self.keyword_tracker.record_match(keyword, trigger_on):
+                        return keyword
         elif keyword_group := keyword_dict.get("keyword_group"):
             key = make_group_key(keyword_group)
-            if cooldown_is_expired(key, notification_cooldown, ignore_keyword_time):
+            if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(key, notification_cooldown):
                 for item in keyword_group:
                     if item.get("keyword"):
                         if item["keyword"].lower() in log_line.lower():
-                            set_keyword_time(key)
-                            return key
+                            if self.keyword_tracker.record_match(key, trigger_on):
+                                return key
+                            break
                     elif item.get("regex"):
                         if re.search(item["regex"], log_line, re.IGNORECASE if not regex_case_sensitive else 0):
-                            set_keyword_time(key)
-                            return key
+                            if self.keyword_tracker.record_match(key, trigger_on):
+                                return key
+                            break
         else:
             self.logger.error(f"No keyword or regex found for {keyword_dict}")
         return None
@@ -345,6 +391,7 @@ class LogProcessor:
             regex=keyword_level_config.get("regex"),
             hostname=self.monitored_target.hostname,
             host_identifier=self.monitored_target.host_identifier,
+            trigger_on=keyword_level_config.get("trigger_on"),
         )
         process_trigger(
             logger=self.logger,

@@ -158,6 +158,9 @@ class NotificationContext:
     log_line: Optional[str] = None
     regex: Optional[str] = None
     keywords_found: List[str] = field(default_factory=list)
+    trigger_on: Optional[dict] = None
+    trigger_on_count: Optional[int] = None
+    trigger_on_timeframe: Optional[int] = None
   
     # container event fields
     event: Optional[str] = None
@@ -190,6 +193,10 @@ class NotificationContext:
             self.swarm_service_name = self.source_metadata.service_name if not self.swarm_service_name else self.swarm_service_name
             self.stack_name = self.source_metadata.stack_name if not self.stack_name else self.stack_name
             self.container_name = self.source_metadata.container_name if not self.container_name else self.container_name
+        
+        if self.trigger_on:
+            self.trigger_on_count = self.trigger_on.get("count")
+            self.trigger_on_timeframe = self.trigger_on.get("timeframe")
 
     def get_defaults(self) -> Dict[str, Any]:
                 # Convert Unix timestamp to datetime or use current time
@@ -223,7 +230,10 @@ class NotificationContext:
             "log_entry": self.log_line,
             "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
             "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
+            "trigger_on_count": self.trigger_on_count,
+            "trigger_on_timeframe": self.trigger_on_timeframe,
 
+            
             "timestamp": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "date": dt.strftime("%Y-%m-%d"),
             "time": dt.strftime("%H:%M:%S"),

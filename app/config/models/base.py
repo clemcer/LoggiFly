@@ -284,6 +284,16 @@ class TriggerActions(BaseModel):
             return validate_and_filter_olivetin_actions(data)
         return data
 
+
+class TriggerOnConfig(BaseConfigModel):
+    """
+    Threshold-based triggering: only trigger when a keyword matches
+    `count` times within `timeframe` seconds.
+    """
+    count: int = Field(ge=2)
+    timeframe: int = Field(ge=1)
+
+
 class TriggerActionsBase(ModularDefaultsConfig, TriggerActions):
     """Base class for keyword items with common fields for actions and templates."""
     pass
@@ -295,6 +305,7 @@ class RegexItem(TriggerActionsBase):
     Template allows for notification formatting using named capturing groups.
     """
     regex: str
+    trigger_on: Optional[TriggerOnConfig] = None
 
 
 class KeywordItem(TriggerActionsBase):
@@ -302,6 +313,8 @@ class KeywordItem(TriggerActionsBase):
     Model for a string-based keyword with optional settings.
     """
     keyword: str
+    trigger_on: Optional[TriggerOnConfig] = None
+
 
 class KeywordGroup(TriggerActionsBase):
     """
@@ -309,6 +322,8 @@ class KeywordGroup(TriggerActionsBase):
     All keywords in the group must match for the group to trigger.
     """
     keyword_group: SimpleKeywords
+    trigger_on: Optional[TriggerOnConfig] = None
+
 
     @field_validator("keyword_group", mode="before")
     def validate_keyword_group(cls, v):
