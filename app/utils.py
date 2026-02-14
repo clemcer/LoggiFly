@@ -13,7 +13,6 @@ class LogAttachment:
 
 
 def get_env_var(key: str, prefix: str = "LOGGIFLY_", fallback_value: str | None = None) -> str | None:
-    # TODO: use this function for all env vars not just config related
     val = os.getenv(f"{prefix}{key}")
     if val:
         if not val.strip():

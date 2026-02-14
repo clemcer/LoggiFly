@@ -1,14 +1,14 @@
 import os
 import sys
 import time
-from utils import convert_to_int
+from utils import convert_to_int, get_env_var
 
 def main():
     """
     Check if the heartbeat file exists and is not too old. Called via docker healthcheck command.
     """
-    heartbeat_path = os.getenv("HEARTBEAT_PATH", "/dev/shm/loggifly-heartbeat")
-    interval = convert_to_int(os.getenv("HEARTBEAT_INTERVAL"), fallback_value=60, min_value=3)
+    heartbeat_path = str(get_env_var("HEARTBEAT_PATH", fallback_value="/dev/shm/loggifly-heartbeat"))
+    interval = convert_to_int(get_env_var("HEARTBEAT_INTERVAL", fallback_value="60"), fallback_value=60, min_value=3)
     max_age = int(interval * 1.5)
 
     try:

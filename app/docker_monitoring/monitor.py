@@ -3,7 +3,6 @@ import threading
 import socket
 import traceback
 import time
-import os
 import random
 import requests
 from typing import Optional
@@ -20,7 +19,7 @@ from constants import (
     NotificationType,
     SUPPORTED_CONTAINER_ACTIONS,
 )
-from utils import convert_to_int, merge_trigger_context
+from utils import convert_to_int, merge_trigger_context, get_env_var
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.helpers import (
@@ -238,9 +237,9 @@ class DockerLogMonitor:
         self.last_action_lock = threading.Lock()
         self._registry = MonitoredContainerRegistry()
 
-        self.configured_stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_CONFIGURED"), fallback_value=24*7)
-        self.stale_threshold_hours = convert_to_int(os.getenv("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED"), fallback_value=24)
-        self.cleanup_interval_minutes = convert_to_int(os.getenv("CLEANUP_INTERVAL_MINUTES"), fallback_value=60, min_value=1)
+        self.configured_stale_threshold_hours = convert_to_int(get_env_var("CLEANUP_THRESHOLD_HOURS_CONFIGURED"), fallback_value=24*7)
+        self.stale_threshold_hours = convert_to_int(get_env_var("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED"), fallback_value=24)
+        self.cleanup_interval_minutes = convert_to_int(get_env_var("CLEANUP_INTERVAL_MINUTES"), fallback_value=60, min_value=1)
         self._start_context_cleanup_thread()
 
 

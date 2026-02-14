@@ -193,9 +193,9 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
     Returns:
         Thread: The monitoring thread
     """
-    health_enabled = os.getenv("ENABLE_HEALTHCHECK", "").strip().lower() == "true"
-    heartbeat_path = os.getenv("HEARTBEAT_PATH", "/dev/shm/loggifly-heartbeat") # works in read_only containers
-    heartbeat_interval = convert_to_int(os.getenv("HEARTBEAT_INTERVAL", "60"), fallback_value=60, min_value=3)
+    health_enabled = str(get_env_var("ENABLE_HEALTHCHECK", fallback_value="false")).strip().lower() == "true"
+    heartbeat_path = str(get_env_var("HEARTBEAT_PATH", fallback_value="/dev/shm/loggifly-heartbeat")) # works in read_only containers
+    heartbeat_interval = convert_to_int(get_env_var("HEARTBEAT_INTERVAL", fallback_value="60"), fallback_value=60, min_value=3)
 
     logging.debug(
         f"Healthcheck enabled with interval {heartbeat_interval}s and path {heartbeat_path}" if health_enabled else "Healthcheck is disabled"

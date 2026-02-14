@@ -10,6 +10,7 @@ from docker.client import DockerClient
 import docker.errors
 import socket
 from constants import Actions
+from utils import get_env_var
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ def cleanup_stale_action_cooldowns(
         # Check if ALL actions for this container are stale
         if all(timestamp < cutoff_time for timestamp in actions.values()):
             stale_containers.append(container)
-    # Remove
+    # Remove stale containers
     for container in stale_containers:
         del action_cooldowns[container]
     # Also cleanup stale individual actions within containers
@@ -367,4 +368,4 @@ def parse_event_type(event: dict) -> str | None:
     return action
 
 def swarm_mode_enabled() -> bool:
-    return os.getenv("LOGGIFLY_MODE", "").strip().lower() == "swarm"
+    return str(get_env_var("LOGGIFLY_MODE", fallback_value="")).strip().lower() == "swarm"
