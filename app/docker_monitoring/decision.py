@@ -1,21 +1,22 @@
 from dataclasses import dataclass
-import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Callable, List
 from enum import Enum
 import fnmatch
-from constants import MonitorType
-from docker_monitoring.helpers import ContainerSnapshot, parse_label_config
+import logging
 
 from pydantic import ValidationError
+
+from constants import MonitorType
 from config.helpers import format_pydantic_error, get_pretty_yaml_config
 from config.models import GlobalConfig
 from config.models import (
-    ContainerSourceConfig, 
-    SwarmSourceConfig, 
-    ContainerRule, 
+    ContainerSourceConfig,
+    SwarmSourceConfig,
+    ContainerRule,
     SwarmRule,
     LabelConfig,
 )
+from docker_monitoring.helpers import ContainerSnapshot, parse_label_config
 from monitoring import EffectiveTargetConfig
 from utils import merge_with_precedence, merge_defaults
 
@@ -26,6 +27,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_RULE_META_FIELDS = {"id", "enabled", "match", "scope", "container_name", "service_name", "stack_name"}
+
+
+class LabelDecision(Enum):
+    """Outcome of checking loggifly.monitor label."""
+    MONITOR = "monitor"
+    SKIP = "skip"
+    UNKNOWN = "unknown"
+
+
+# ── Module-level helper functions ───────────────────────────────────
 
 def matches_glob_list(value: str, patterns: List[str] | None, case_sensitive: bool = True) -> bool:
     """Check if value matches any glob pattern in the list."""
@@ -40,111 +52,128 @@ def matches_glob_list(value: str, patterns: List[str] | None, case_sensitive: bo
                 return True
     return False
 
-def merge_rules(rules, overlays) -> dict:
+
+def check_label(labels: dict | None) -> LabelDecision:
+    """Extract and check the 'loggifly.monitor' label value. service_labels can be None."""
+    if labels is None:
+        return LabelDecision.UNKNOWN
+    monitor_value = labels.get("loggifly.monitor", "").lower().strip()
+    if not monitor_value:
+        return LabelDecision.UNKNOWN
+    if monitor_value == "true":
+        return LabelDecision.MONITOR
+    elif monitor_value == "false":
+        return LabelDecision.SKIP
+    return LabelDecision.UNKNOWN
+
+
+def validate_label_config(labels: dict, target_name: str) -> dict | None:
+    """Validate parsed label config using LabelConfig model. Returns dict or None on failure."""
+    try:
+        label_config = LabelConfig.model_validate(labels)
+        return label_config.model_dump(exclude_none=True) if label_config else None
+    except ValidationError as e:
+        logger.error(f"Error validating label config for {target_name}: {format_pydantic_error(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error validating label config for {target_name}: {e}")
+    return None
+
+
+def is_matched_rule(rule: ContainerRule | SwarmRule, filter_mapping: dict[str, str], hostname: str) -> bool:
+    """Check if a rule matches the given filter values and hostname.
+
+    filter_mapping example: {"service_names": "my-service", "container_names": "my-container"}
+    """
+    if not rule.enabled:
+        return False
+    if rule.scope and rule.scope.hosts:
+        if not matches_glob_list(hostname, rule.scope.hosts):
+            return False
+    if rule.match.exclude:
+        for k, v in filter_mapping.items():
+            if pattern_list := getattr(rule.match.exclude, k, None):
+                if matches_glob_list(v, pattern_list):
+                    return False
+    for k, v in filter_mapping.items():
+        if pattern_list := getattr(rule.match.include, k, None):
+            if matches_glob_list(v, pattern_list):
+                return True
+    return False
+
+
+def merge_rules_and_overlays(rules: List[ContainerRule | SwarmRule], overlays: List[ContainerRule | SwarmRule]) -> dict:
+    """Merge matched rules and overlays into a single config dict. Later entries take precedence."""
     result = {}
-    for rule in rules + overlays:
-        result = merge_with_precedence(precedence=rule.model_dump(exclude_none=True), fallback=result)
+    for ro in rules + overlays:
+        result = merge_with_precedence(
+            precedence=ro.model_dump(exclude_none=True, exclude=_RULE_META_FIELDS),
+            fallback=result,
+        )
     return result
+
+
+def create_target_config(
+    snapshot: ContainerSnapshot,
+    validated_label_config: dict | None,
+    target_dict: dict,
+    source_config: ContainerSourceConfig | SwarmSourceConfig | None,
+    global_config: GlobalConfig,
+) -> EffectiveTargetConfig:
+    """Build the effective target config by merging: global defaults < source defaults < rules/overlays < labels."""
+    global_config_dict = global_config.model_dump(exclude_none=True)
+    source_config_dict = source_config.model_dump(exclude_none=True) if source_config else {}
+
+    keywords = source_config_dict.get("keywords", []) + target_dict.get("keywords", [])
+    container_events = (source_config_dict.get("container_events") or []) + (target_dict.get("container_events") or [])
+    defaults = merge_defaults(
+        precedence=target_dict,
+        fallback=merge_defaults(
+            precedence=source_config_dict.get("defaults", {}),
+            fallback=global_config_dict.get("defaults", {}),
+        ),
+    )
+
+    logger.debug(f"Created the following defaults for {snapshot.target_name}: {defaults}")
+    effective = {
+        "keywords": keywords,
+        "container_events": container_events,
+    }
+    effective.update(defaults)
+    if validated_label_config:
+        effective = merge_with_precedence(precedence=validated_label_config, fallback=effective)
+
+    effective_target_config = EffectiveTargetConfig.model_validate(effective)
+    logger.debug(f"Effective target config for {snapshot.target_name}:\n{get_pretty_yaml_config(effective_target_config, top_level_key=snapshot.target_name)}")
+    return effective_target_config
 
 
 @dataclass
 class MonitorDecision:
     result: 'MonitorDecision.Result'
     reason: str = ""
-    matched_rules: List | None = None
-    matched_overlays: List | None = None
+    matched_rules: List[str] | None = None
+    matched_overlays: List[str] | None = None
     target_config: EffectiveTargetConfig | None = None
-    matched_via_labels: bool | None = False
+    labels_applied: bool = False
 
     class Result(Enum):
         """Possible monitoring decision outcomes."""
-        MONITOR = "monitor"              # Start or continue monitoring
-        SKIP = "skip"                    # Explicitly excluded (via label or config)
-        NOT_CONFIGURED = "not_configured"  # Not in config, monitor_all disabled
-        STOP_MONITORING = "stop"         # Currently monitored but should stop (reload)
-
-    class LabelDecision(Enum):
-        """Outcome of checking loggifly.monitor label."""
         MONITOR = "monitor"
         SKIP = "skip"
-        UNKNOWN = "unknown"
-
-    @staticmethod
-    def _check_label(labels: dict | None) -> 'MonitorDecision.LabelDecision':
-        """Extract and check the 'loggifly.monitor' label value."""
-        if labels is None:
-            return MonitorDecision.LabelDecision.UNKNOWN
-        monitor_value = labels.get("loggifly.monitor", "").lower().strip()
-        if not monitor_value:
-            return MonitorDecision.LabelDecision.UNKNOWN
-        if monitor_value == "true":
-            return MonitorDecision.LabelDecision.MONITOR
-        elif monitor_value == "false":
-            return MonitorDecision.LabelDecision.SKIP
-        return MonitorDecision.LabelDecision.UNKNOWN
+        NOT_CONFIGURED = "not_configured"
+        STOP_MONITORING = "stop"
 
     @property
     def should_monitor(self) -> bool:
-        """Whether monitoring should start or continue."""
         return self.result == MonitorDecision.Result.MONITOR
 
     @property
     def should_stop(self) -> bool:
-        """Whether existing monitoring should stop."""
         return self.result == MonitorDecision.Result.STOP_MONITORING
 
-    @staticmethod
-    def _validate_label_config(labels: dict, target_name: str) -> LabelConfig | None:
-        try:
-            return LabelConfig.model_validate(labels)
-        except ValidationError as e:
-            logging.error(f"Error validating label config for {target_name}: {format_pydantic_error(e)}")
-        except Exception as e:
-            logging.error(f"Unexpected error validating label config for {target_name}: {e}")
-        return None
-
+    # ── Public API ──────────────────────────────────────────────────
 
     @classmethod
-    def create_target_config(
-        cls,
-        snapshot: ContainerSnapshot,
-        label_config: dict | None,
-        target_dict: dict, 
-        source_config: ContainerSourceConfig | SwarmSourceConfig | None, 
-        global_config: GlobalConfig, 
-        ) -> EffectiveTargetConfig:
-
-        # TODO: regarding labels: what about defaults and source keywords?
-        # if snapshot.labels.get("loggifly.ignore_config", "false").lower() == "true":
-        #     return EffectiveTargetConfig.model_validate(label_config)
-
-
-        global_config_dict = global_config.model_dump(exclude_none=True)
-        source_config_dict = source_config.model_dump(exclude_none=True) if source_config else {}
-
-        keywords = source_config_dict.get("keywords", []) + target_dict.get("keywords", [])
-        container_events = (source_config_dict.get("container_events") or []) + (target_dict.get("container_events") or[])
-        defaults = (merge_defaults(
-            precedence=target_dict, 
-            fallback=merge_defaults(
-                precedence=source_config_dict.get("defaults", {}), fallback=global_config_dict.get("defaults", {}))
-                )
-            )
-
-        logger.debug(f"Created the following defaults for {snapshot.target_name}: {defaults}")
-        effective = {
-            "keywords": keywords,
-            "container_events": container_events,
-        }
-        effective.update(defaults)
-        if label_config:
-            effective = merge_with_precedence(precedence=label_config, fallback=effective)
-
-        effective_target_config = EffectiveTargetConfig.model_validate(effective)
-        logger.debug(f"Effective target config for {snapshot.target_name}:\n{get_pretty_yaml_config(effective_target_config, top_level_key=snapshot.target_name)}")
-        return effective_target_config
-
-    @classmethod    
     def evaluate(
         cls,
         snapshot: ContainerSnapshot,
@@ -152,26 +181,20 @@ class MonitorDecision:
         hostname: str,
     ) -> 'MonitorDecision':
         """
-        Decide if a container should be monitored based on labels, config, and settings.
+        Decide if a container/service should be monitored.
 
         Decision precedence:
-        1. Labels: loggifly.monitor=true/false
-        2. Explicit config: containers.{name} or swarm_services.{name}
-        3. Global settings: monitor_all_containers/monitor_all_swarm_services
-        4. Exclusions: excluded_containers/excluded_swarm_services
+          1. Labels with ignore_config (bypass everything)
+          2. Label skip (loggifly.monitor=false)
+          3. never_monitor (absolute exclusion)
+          4. scope (host filtering)
+          5. Rules (selection into monitoring)
+          6. Overlays (additional config for already-selected targets)
         """
         if snapshot.is_swarm_service:
-            return cls._evaluate_swarm(
-                snapshot=snapshot,
-                global_config=global_config,
-                hostname=hostname,
-            )
+            return cls._evaluate_swarm(snapshot, global_config, hostname)
         else:
-            return cls._evaluate_container(
-                snapshot=snapshot,
-                global_config=global_config,
-                hostname=hostname,
-            )
+            return cls._evaluate_container(snapshot, global_config, hostname)
 
     @classmethod
     def evaluate_for_reload(
@@ -182,43 +205,43 @@ class MonitorDecision:
     ) -> 'MonitorDecision':
         """
         Decide if a currently monitored container should continue being monitored.
-
-        Used during config reload to determine if monitoring should stop or continue
-        with updated configuration.
+        Used during config reload.
         """
+        if ctx.snapshot is None:
+            return cls(
+                result=cls.Result.STOP_MONITORING,
+                reason="no snapshot available during reload",
+            )
         if ctx.monitor_type == MonitorType.CONTAINER:
-            return cls._evaluate_container_for_reload(
-                ctx=ctx,
-                new_config=new_config,
-                hostname=hostname,
-            )
+            decision = cls._evaluate_container(ctx.snapshot, new_config, hostname)
         elif ctx.monitor_type == MonitorType.SWARM:
-            return cls._evaluate_swarm_for_reload(
-                ctx=ctx,
-                new_config=new_config,
-                hostname=hostname,
-            )
+            decision = cls._evaluate_swarm(ctx.snapshot, new_config, hostname)
         else:
             raise ValueError(f"Invalid monitor type: {ctx.monitor_type}")
-            
-    @staticmethod
-    def _is_matched_rule(rule: ContainerRule | SwarmRule, filter_mapping: dict[str, str], hostname: str):
-        """filter_mapping example: {"service_names": "my-service", "container_names": "my-container"}"""
-        if not rule.enabled:
-            return False
-        if rule.scope and rule.scope.hosts:
-            if not matches_glob_list(hostname, rule.scope.hosts):
-                return False
-        if rule.match.exclude:
-            for k, v in filter_mapping.items():
-                if pattern_list := getattr(rule.match.exclude, k, None):
-                    if matches_glob_list(v, pattern_list):
-                        return False
-        for k, v in filter_mapping.items():
-            if pattern_list := getattr(rule.match.include, k, None):
-                if matches_glob_list(v, pattern_list):
-                    return True
-        return False
+
+        if decision.should_monitor:
+            return decision
+        return cls(result=cls.Result.STOP_MONITORING, reason=decision.reason)
+
+    # ── Thin wrappers that prepare parameters for _evaluate_target ──
+
+    @classmethod
+    def _evaluate_container(
+        cls,
+        snapshot: ContainerSnapshot,
+        global_config: GlobalConfig,
+        hostname: str,
+    ) -> 'MonitorDecision':
+        return cls._evaluate_target(
+            snapshot=snapshot,
+            global_config=global_config,
+            hostname=hostname,
+            target_name=snapshot.name,
+            source_config=global_config.containers,
+            label_sources=[(snapshot.labels, "container labels")],
+            filter_mapping={"container_names": snapshot.name},
+            never_monitor_check=lambda nm: matches_glob_list(snapshot.name, nm.container_names),
+        )
 
     @classmethod
     def _evaluate_swarm(
@@ -228,277 +251,148 @@ class MonitorDecision:
         hostname: str,
     ) -> 'MonitorDecision':
         service_name = snapshot.service_name
-        stack_name = snapshot.stack_name
-
         assert service_name is not None, "service_name must not be None for swarm service containers"
 
-        decision = cls.LabelDecision.UNKNOWN
-        label_source = None
-
-        # Try service labels first
-        labels = {}
-        if snapshot.service_labels:
-            labels = snapshot.service_labels
-            decision = cls._check_label(snapshot.service_labels)
-            label_source = "swarm service labels"
-
-
-        # Fallback to container labels if unknown
-        if decision == cls.LabelDecision.UNKNOWN:
-            labels = snapshot.labels
-            decision = cls._check_label(labels)
-            label_source = "container labels"
-
-        if decision == cls.LabelDecision.SKIP:
-            return cls(
-                result=cls.Result.SKIP,
-                reason="skipped via labels",
-            )
-
-        # check if excluded by host scope or never_monitor
-        source_config = global_config.swarm
-        if source_config:
-            if source_config.scope and source_config.scope.hosts:
-                if not matches_glob_list(hostname, source_config.scope.hosts):
-                    return cls(
-                        result=cls.Result.SKIP,
-                        reason="skipped via scope",
-                    )
-            if source_config.never_monitor:
-                if matches_glob_list(service_name, source_config.never_monitor.service_names or []):
-                    return cls(
-                        result=cls.Result.SKIP,
-                        reason="skipped via never_monitor.service_names",
-                    )
-                if stack_name and matches_glob_list(stack_name, source_config.never_monitor.stack_names or []):
-                    return cls(
-                        result=cls.Result.SKIP,
-                        reason="skipped via never_monitor.stack_names",
-                    )
-
-        # check if container should ONLY be monitored via labels (ignore config)
-        label_config = None
-        if decision == cls.LabelDecision.MONITOR:
-            ignore_config = snapshot.labels.get("loggifly.ignore_config", "false").lower() == "true"
-            parsed_labels = parse_label_config(labels)
-            label_config = cls._validate_label_config(parsed_labels, service_name)
-            if label_config:
-                label_config = label_config.model_dump(exclude_none=True)
-                if ignore_config:
-                    effective_target_config = EffectiveTargetConfig.model_validate(label_config)
-                    return cls(
-                        result=cls.Result.MONITOR,
-                        reason=f"monitored via {label_source}",
-                        matched_rules=None,
-                        target_config=effective_target_config,
-                        matched_via_labels=True
-                    )
-            else:
-                if ignore_config:
-                    logger.error(f"Failed to validate label config for {service_name}. Since 'loggifly.ignore_config' is set to 'true' this swarm service will be skipped and the config ignored.")
-                    return cls(
-                        result=cls.Result.SKIP,
-                        reason="skipped via 'loggifly.ignore_config' label and invalid label config",
-                    )
+        def never_monitor_check(nm) -> bool:
+            if matches_glob_list(service_name, nm.service_names):
+                return True
+            if snapshot.stack_name and matches_glob_list(snapshot.stack_name, nm.stack_names):
+                return True
+            return False
 
         filter_mapping = {"service_names": service_name}
-        if stack_name:
-            filter_mapping["stack_names"] = stack_name
-        
-        # Get matching rules
-        rules = []
-        if global_config.swarm and global_config.swarm.rules:
-            for rule in global_config.swarm.rules:
-                if cls._is_matched_rule(rule, filter_mapping, hostname):
-                    rules.append(rule)
+        if snapshot.stack_name:
+            filter_mapping["stack_names"] = snapshot.stack_name
 
-        matched_rules = [rule.id for rule in rules]
-
-        if rules:
-            reason = f"monitored via {label_source} and rules ({matched_rules})" if decision == cls.LabelDecision.MONITOR else f"monitored via rules ({matched_rules})"
-        else:
-            if label_config:
-                effective_target_config = EffectiveTargetConfig.model_validate(label_config)
-                return cls(
-                    result=cls.Result.MONITOR,
-                    reason=f"monitored via {label_source} and no rules",
-                    matched_rules=None,
-                    target_config=effective_target_config,
-                    matched_via_labels=True
-                )
-            return cls(
-                result=cls.Result.NOT_CONFIGURED,
-                reason="not in config and not monitored via labels"
-            )
-
-        # collect overlays
-        overlays = []
-        if global_config.swarm and global_config.swarm.overlays:
-            for overlay in global_config.swarm.overlays:
-                if cls._is_matched_rule(overlay, filter_mapping, hostname):
-                    overlays.append(overlay)
-
-        merged_rule = merge_rules(rules, overlays)
-        target_config = cls.create_target_config(
-            label_config=label_config,
-            target_dict=merged_rule,
-            source_config=global_config.swarm,
-            global_config=global_config,
+        return cls._evaluate_target(
             snapshot=snapshot,
-        )
-        return cls(
-            result=cls.Result.MONITOR,
-            reason=reason,
-            matched_rules=matched_rules,
-            target_config=target_config,
-            matched_via_labels=False
+            global_config=global_config,
+            hostname=hostname,
+            target_name=service_name,
+            source_config=global_config.swarm,
+            label_sources=[
+                (snapshot.service_labels, "swarm service labels"),
+                (snapshot.labels, "container labels"),
+            ],
+            filter_mapping=filter_mapping,
+            never_monitor_check=never_monitor_check,
         )
 
+    # ── Core decision logic (shared) ────────────────────────────────
 
     @classmethod
-    def _evaluate_container(
+    def _evaluate_target(
         cls,
         snapshot: ContainerSnapshot,
         global_config: GlobalConfig,
         hostname: str,
+        target_name: str,
+        source_config: ContainerSourceConfig | SwarmSourceConfig | None,
+        label_sources: list[tuple[dict | None, str]],
+        filter_mapping: dict[str, str],
+        never_monitor_check: Callable,
     ) -> 'MonitorDecision':
-        cname = snapshot.name
 
-        # Check labels
-        label_decision = cls._check_label(snapshot.labels)
+        # 1. Check labels (iterate sources in priority order)
+        label_decision = LabelDecision.UNKNOWN
+        validated_label_config = None
+        label_source = None
 
-        if label_decision == cls.LabelDecision.SKIP:
+        for labels, source_name in label_sources:
+            if not labels:
+                continue
+            d = check_label(labels)
+
+            if d == LabelDecision.SKIP:
+                return cls(result=cls.Result.SKIP, reason=f"skipped via {source_name}")
+
+            if d == LabelDecision.MONITOR:
+                label_decision = d
+                label_source = source_name
+                ignore_config = labels.get("loggifly.ignore_config", "false").lower() == "true"
+                parsed = parse_label_config(labels)
+                validated_label_config = validate_label_config(parsed, target_name)
+
+                if ignore_config:
+                    if validated_label_config:
+                        return cls(
+                            result=cls.Result.MONITOR,
+                            reason=f"monitored via {source_name} (config ignored)",
+                            target_config=EffectiveTargetConfig.model_validate(validated_label_config),
+                            labels_applied=True,
+                        )
+                    else:
+                        logger.error(
+                            f"Failed to validate {source_name} config for {target_name}. "
+                            f"Since 'loggifly.ignore_config' is set to 'true' this target will be skipped."
+                        )
+                        return cls(
+                            result=cls.Result.SKIP,
+                            reason="skipped via 'loggifly.ignore_config' label and invalid label config",
+                        )
+
+                if not validated_label_config:
+                    logger.error(
+                        f"Failed to validate {source_name} config for {target_name}. "
+                        f"Falling back to rule-based matching via regular config."
+                    )
+                break  # first MONITOR wins, stop checking further label sources
+
+        # 2. never_monitor (takes precedence over label opt-in without ignore_config)
+        if source_config and source_config.never_monitor:
+            if never_monitor_check(source_config.never_monitor):
+                return cls(result=cls.Result.SKIP, reason="skipped via never_monitor")
+
+        # 3. Host scope
+        if source_config and source_config.scope and source_config.scope.hosts:
+            if not matches_glob_list(hostname, source_config.scope.hosts):
+                return cls(result=cls.Result.SKIP, reason="skipped via scope")
+
+        # 4. Find matching rules
+        rules = []
+        if source_config and source_config.rules:
+            for rule in source_config.rules:
+                if is_matched_rule(rule, filter_mapping, hostname):
+                    rules.append(rule)
+        matched_rule_ids = [rule.id for rule in rules]
+
+        # 5. Determine if target should be monitored
+        if rules:
+            if label_decision == LabelDecision.MONITOR:
+                reason = f"monitored via {label_source} and rules ({matched_rule_ids})"
+            else:
+                reason = f"monitored via rules ({matched_rule_ids})"
+        elif validated_label_config:
+            reason = f"monitored via {label_source} (no rules matched)"
+        else:
             return cls(
-                result=cls.Result.SKIP,
-                reason="skipped via labels",
+                result=cls.Result.NOT_CONFIGURED,
+                reason="not in config and not monitored via labels",
             )
 
-        # check if excluded by host scope or never_monitor
-        source_config = global_config.containers
-        if source_config:
-            if source_config.scope and source_config.scope.hosts:
-                if not matches_glob_list(hostname, source_config.scope.hosts):
-                    return cls(
-                        result=cls.Result.SKIP,
-                        reason="skipped via scope",
-                    )
-            if source_config.never_monitor:
-                if matches_glob_list(cname, source_config.never_monitor.container_names):
-                    return cls(
-                        result=cls.Result.SKIP,
-                        reason="skipped via never_monitor",
-                    )
-
-        # check if container should ONLY be monitored via labels (ignore config)
-        label_config = None
-        if label_decision == cls.LabelDecision.MONITOR:
-            ignore_config = snapshot.labels.get("loggifly.ignore_config", "false").lower() == "true"
-            parsed_labels = parse_label_config(snapshot.labels)
-            label_config = cls._validate_label_config(parsed_labels, cname)
-            if label_config:
-                logger.debug(f"Validated label config for {cname}:\n{get_pretty_yaml_config(label_config, top_level_key=cname)}")
-                label_config = label_config.model_dump(exclude_none=True)
-                if ignore_config:
-                    effective_target_config = EffectiveTargetConfig.model_validate(label_config)
-                    return cls(
-                        result=cls.Result.MONITOR,
-                        reason="monitored via container labels (config ignored)",
-                        matched_rules=None,
-                        target_config=effective_target_config,
-                        matched_via_labels=True
-                    )
-            else:
-                if ignore_config:
-                    logger.error(f"Failed to validate label config for {cname}. Since 'loggifly.ignore_config' is set to 'true' this container will be skipped and the config ignored.")
-                    return cls(
-                        result=cls.Result.SKIP,
-                        reason="skipped because of 'loggifly.ignore_config' label and invalid label config",
-                    )
-                logger.error(f"Failed to validate label config for {cname}.")
-
-        # Get matching rules
-        rules = []
-        filter_mapping = {"container_names": cname}
-        if global_config.containers and global_config.containers.rules:
-            for rule in global_config.containers.rules:
-                if cls._is_matched_rule(rule, filter_mapping, hostname):
-                    rules.append(rule)
-
-        matched_rules = [rule.id for rule in rules]
-
-        if rules:
-            reason = f"monitored via container labels and rules ({matched_rules})" if label_decision == cls.LabelDecision.MONITOR else f"monitored via container rules ({matched_rules})"
-        else:
-            if not label_config:
-                return cls(
-                    result=cls.Result.NOT_CONFIGURED,
-                    reason="not in config and not monitored via labels"
-                )
-            reason = f"monitored via container labels and no rules"
-
-        # collect overlays
+        # 6. Collect overlays
         overlays = []
-        if global_config.containers and global_config.containers.overlays:
-            for overlay in global_config.containers.overlays:
-                if cls._is_matched_rule(overlay, filter_mapping, hostname):
+        if source_config and source_config.overlays:
+            for overlay in source_config.overlays:
+                if is_matched_rule(overlay, filter_mapping, hostname):
                     overlays.append(overlay)
+        matched_overlay_ids = [overlay.id for overlay in overlays]
 
-        merged_rule = merge_rules(rules, overlays)
-        target_config = cls.create_target_config(
-            label_config=label_config,
-            target_dict=merged_rule,
-            source_config=global_config.containers,
-            global_config=global_config,
+        # 7. Build effective config
+        merged_rule = merge_rules_and_overlays(rules, overlays)
+        target_config = create_target_config(
             snapshot=snapshot,
+            validated_label_config=validated_label_config,
+            target_dict=merged_rule,
+            source_config=source_config,
+            global_config=global_config,
         )
+
         return cls(
             result=cls.Result.MONITOR,
             reason=reason,
-            matched_rules=matched_rules,
+            matched_rules=matched_rule_ids,
+            matched_overlays=matched_overlay_ids,
             target_config=target_config,
-            matched_via_labels=False
+            labels_applied=validated_label_config is not None,
         )
-        
-    @classmethod
-    def _evaluate_container_for_reload(
-        cls,
-        ctx: 'MonitoredContainerContext',
-        new_config: GlobalConfig,
-        hostname: str,
-    ) -> 'MonitorDecision':
-
-        if ctx.snapshot is None:
-            return cls(
-                result=cls.Result.STOP_MONITORING,
-                reason="no container snapshot available during reload",
-            )
-        decision = cls._evaluate_container(ctx.snapshot, new_config, hostname)
-        if decision.should_monitor:
-            return decision
-        else:
-            return cls(
-                result=cls.Result.STOP_MONITORING,
-                reason=decision.reason
-            )
-
-    @classmethod
-    def _evaluate_swarm_for_reload(
-        cls,
-        ctx: 'MonitoredContainerContext',
-        new_config: GlobalConfig,
-        hostname: str,
-    ) -> 'MonitorDecision':
-    
-        if ctx.snapshot is None:
-            return cls(
-                result=cls.Result.STOP_MONITORING,
-                reason="no swarm service snapshot available during reload",
-            )
-        decision = cls._evaluate_swarm(ctx.snapshot, new_config, hostname)
-        if decision.should_monitor:
-            return decision
-        else:
-            return cls(
-                result=cls.Result.STOP_MONITORING,
-                reason=decision.reason
-            )

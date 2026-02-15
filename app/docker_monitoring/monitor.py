@@ -343,7 +343,7 @@ class DockerLogMonitor:
         ) -> MonitoredContainerContext:
         """Prepare or reuse monitoring context for a container."""
         assert decision.target_config is not None, "target_config must be set when monitoring"
-        assert decision.matched_via_labels is not None, "config_via_labels must be set when monitoring"
+        assert decision.labels_applied is not None, "labels_applied must be set when monitoring"
 
         monitor_type = MonitorType.SWARM if snapshot.is_swarm_service else MonitorType.CONTAINER
 

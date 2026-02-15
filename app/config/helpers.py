@@ -331,6 +331,7 @@ def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
 
 
 def generate_id_for_rules(data: Any) -> Any:
+    # TODO: validate no duplicate ids
     if isinstance(data, dict):
         for idx, rule in enumerate(data.get("rules", []), 1):
             if rule.get("id") is None:
