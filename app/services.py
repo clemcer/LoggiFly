@@ -45,7 +45,8 @@ class OlivetinAction:
                 login_response = requests.post(
                     url=login_url,
                     headers={"accept": "application/json", "Content-Type": "application/json"},
-                    json={"username": username, "password": password}
+                    json={"username": username, "password": password},
+                    timeout=(5, 30),
                 )
                 
                 if login_response.status_code != 200:
@@ -70,7 +71,8 @@ class OlivetinAction:
         try:
             response = requests.get(
                 url=f"{url}/api/WhoAmI",
-                cookies={"olivetin-sid-local": auth_cookie}
+                cookies={"olivetin-sid-local": auth_cookie},
+                timeout=(5, 10),
             )
             if response.status_code != 200:
                 logger.info(f"Olivetin cookie is not valid: {response.status_code} - {response.text}")
@@ -99,7 +101,8 @@ class OlivetinAction:
             action_response = requests.post(
                 url=action_url,
                 cookies=cookies,
-                json=olivetin_request_object
+                json=olivetin_request_object,
+                timeout=(5, 600),
             )
             if action_response.status_code == 200:
                 logger.debug("Successfully established connection to Olivetin")

@@ -19,6 +19,7 @@ from watchdog.events import FileSystemEventHandler
 
 from docker_monitoring.monitor import DockerLogMonitor
 from notifier import send_notification
+from trigger import shutdown_trigger_executor
 from utils import convert_to_int, get_env_var
 
 from config.load_config import load_config, ConfigLoadError
@@ -87,6 +88,7 @@ def create_handle_signal(docker_hosts: List[DockerClientInfo], config, config_ob
             thread.start()
         for thread in threads:
             thread.join(timeout=2)    
+        shutdown_trigger_executor()
         global_shutdown_event.set()
 
     return handle_signal, global_shutdown_event

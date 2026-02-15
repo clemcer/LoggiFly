@@ -72,7 +72,6 @@ class MonitorDecision:
     @staticmethod
     def _check_label(labels: dict | None) -> 'MonitorDecision.LabelDecision':
         """Extract and check the 'loggifly.monitor' label value."""
-        # return MonitorDecision.LabelDecision.UNKNOWN # TODO: implement
         if labels is None:
             return MonitorDecision.LabelDecision.UNKNOWN
         monitor_value = labels.get("loggifly.monitor", "").lower().strip()

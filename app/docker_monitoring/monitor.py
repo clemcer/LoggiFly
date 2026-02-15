@@ -682,8 +682,6 @@ class DockerLogMonitor:
                                 self._stop_and_close_stream(ctx, wait_for_thread=False)
 
                         if (ctx:= self._registry.get_by_id(container_id)) and ctx.currently_configured:
-                        # TODO: do it in separate thread. Especially necessary when container_actions are performed
-                        # Or maybe just put process_trigger in separate thread?
                             self._process_event(event, ctx) 
 
                 except docker.errors.NotFound as e:
