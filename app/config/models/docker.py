@@ -15,7 +15,7 @@ from config.models.base import (
 )
 from config.helpers import (
     validate_container_events,
-    generate_id_for_rules,
+    validate_and_generate_ids,
     convert_shorthand_to_match,
 )
 
@@ -91,7 +91,7 @@ class ContainerSourceConfig(KeywordBase, ContainerEventBase):
 
     @model_validator(mode="before")
     def generate_ids_if_missing(cls, data: dict) -> dict:
-        return generate_id_for_rules(data)
+        return validate_and_generate_ids(data, "containers")
 
 
 # ================================================
@@ -145,7 +145,7 @@ class SwarmSourceConfig(KeywordBase, ContainerEventBase):
 
     @model_validator(mode="before")
     def generate_ids_if_missing(cls, data: dict) -> dict:
-        return generate_id_for_rules(data)
+        return validate_and_generate_ids(data, "swarm")
 
 
 class LabelConfig(KeywordBase, ContainerEventBase, ModularDefaultsConfig):

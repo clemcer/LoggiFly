@@ -330,15 +330,34 @@ def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
     return filtered_actions
 
 
-def generate_id_for_rules(data: Any) -> Any:
-    # TODO: validate no duplicate ids
+def validate_and_generate_ids(data: Any, source_name: str) -> Any:
+
+    def _process_items(items: list[dict], prefix: str, label: str):
+        # First pass: collect all valid explicit IDs and detect duplicates
+        seen: set[str] = set()
+        for item in items:
+            item_id = item.get("id")
+            if item_id is None:
+                continue
+            if item_id in seen:
+                handle_error(f"Duplicate id found in {label}: {item_id}")
+                item.pop("id")
+            else:
+                seen.add(item_id)
+
+        # Second pass: generate IDs for items that don't have one, avoiding collisions
+        counter = 1
+        for item in items:
+            if item.get("id") is None:
+                while f"{prefix}-{counter}" in seen:
+                    counter += 1
+                item["id"] = f"{prefix}-{counter}"
+                seen.add(item["id"])
+                counter += 1
+
     if isinstance(data, dict):
-        for idx, rule in enumerate(data.get("rules", []), 1):
-            if rule.get("id") is None:
-                rule["id"] = f"rule-{idx}"
-        for idx, overlay in enumerate(data.get("overlays", [])):                                        
-            if overlay.get("id") is None:                 
-                overlay["id"] = f"overlay-{idx}"
+        _process_items(data.get("rules", []), "rule", f"{source_name}.rules")
+        _process_items(data.get("overlays", []), "overlay", f"{source_name}.overlays")
     return data
 
 
