@@ -289,11 +289,13 @@ def validate_ntfy_priority(v):
     Validate and normalize the ntfy priority value. 
     """
     if isinstance(v, str):
+        v = v.strip()
         if not v.isdigit():
             options = ["max", "urgent", "high", "default", "low", "min"]
             if v not in options:
                 handle_error(f"Ntfy priority:'{v}'. Only 'max', 'urgent', 'high', 'default', 'low', 'min' or integer between 1-5 are allowed.", "Using default: '3'")
                 return 3
+            return v
         try:
             v = int(v)
         except ValueError:
