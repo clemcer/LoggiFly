@@ -121,7 +121,7 @@ class OlivetinAction:
 
 
 # Global instance and thread lock for singleton pattern
-_olivetin_action = None
+_olivetin_action = OlivetinAction()
 
 
 def perform_olivetin_action(
@@ -143,10 +143,6 @@ def perform_olivetin_action(
         logger.error("No action ID provided")
         return "Olivetin Action Failed", "Olivetin Action failed with no action ID"
     arguments = olivetin_action_config.get("arguments")
-    global _olivetin_action
-    
-    if _olivetin_action is None:
-        _olivetin_action = OlivetinAction()
     response = _olivetin_action.trigger_action(url, action_id, arguments, username, password)
     if not response:
         return "Olivetin Action Failed", "Olivetin Action failed with no response"

@@ -43,7 +43,7 @@ def _process_trigger(
         logger.debug(f"Processing trigger for {monitored_target.target_name} with trigger context: {trigger_context}")
         action_to_perform = trigger_context.get("container_action")
 
-        logger.debug(f"Action to perform: {action_to_perform}.Supports container actions: {monitored_target.supports_container_actions()}")
+        logger.debug(f"Action to perform: {action_to_perform}. Supports container actions: {monitored_target.supports_container_actions()}")
         # Perform action if configured and supported by this target type
         if action_to_perform is not None and monitored_target.supports_container_actions():
             action_cooldown = trigger_context.get("action_cooldown", 300)
@@ -63,7 +63,7 @@ def _process_trigger(
         attach_logfile = trigger_context.get("attach_logfile", False)
         attachment_lines = trigger_context.get("attachment_lines", 20) if isinstance(trigger_context.get("attachment_lines"), int) else 20
         if attach_logfile:
-            if result := monitored_target.get_log_tail(attachment_lines if isinstance(attachment_lines, int) else 20):
+            if result := monitored_target.get_log_tail(attachment_lines):
                 attachment = LogAttachment(
                     content=result,
                     file_name=f"last_{attachment_lines}_lines_from_{monitored_target.target_name}.log",

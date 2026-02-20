@@ -58,7 +58,6 @@ def build_ntfy_action_header(actions: list) -> str:
         return out
 
     action_list = []
-    header = ""
     for idx, a in enumerate(actions, 1):
         if idx > 3:
             logging.warning(f"Ntfy Action: You can only have up to 3 actions. Only using the first 3 actions: '{actions[:3]}'.")
@@ -122,7 +121,7 @@ def get_notification_config(modular_settings: dict, global_service_config: dict,
     return merge_with_precedence(
         _normalize_and_strip_prefix(modular_settings, prefix, keys),
         _normalize_and_strip_prefix(global_service_config, prefix, keys),
-        # ntfy_actions, webhook_headers, nttfy_headers override each other and are not merged
+        # ntfy_actions, webhook_headers, ntfy_headers override each other and are not merged
         list_union=False,
         dict_merge=False,
     )
@@ -193,9 +192,14 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
 
     headers = {
         "Title": title.encode("latin-1", errors="ignore").decode("latin-1").strip(),
-        "Icon": "https://raw.githubusercontent.com/clemcer/LoggiFly/refs/heads/main/docs/public/icon.png",
         "Priority": f"{ntfy_config.get('priority', 3)}"
     }
+
+    if ntfy_config.get("icon"):
+        headers["Icon"] = ntfy_config.get("icon")
+    else:
+        headers["Icon"] = "https://raw.githubusercontent.com/clemcer/LoggiFly/refs/heads/main/docs/public/icon.png"
+
     if ntfy_config.get("token"):
         headers["Authorization"] = f"Bearer {ntfy_config['token']}"
     elif ntfy_config.get('username') and ntfy_config.get('password'):
@@ -208,8 +212,6 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
         headers["Actions"] = action_header
     if ntfy_config.get("tags"):
         headers["Tags"] = ntfy_config.get("tags")
-    if ntfy_config.get("icon"):
-        headers["Icon"] = ntfy_config.get("icon")
     if ntfy_config.get("click"):
         headers["Click"] = ntfy_config.get("click")
     if ntfy_config.get("markdown"):
@@ -226,19 +228,22 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
                 response = requests.post(
                     f"{ntfy_config['url']}/{ntfy_config['topic']}?message={urllib.parse.quote(message)}",
                     data=file_content,
-                    headers=headers
+                    headers=headers,
+                    timeout=10
                 )
             else:
                 response = requests.post(
                     f"{ntfy_config['url']}/{ntfy_config['topic']}",
                     data=file_content,
-                    headers=headers
+                    headers=headers,
+                    timeout=10
                 )
         else:
             response = requests.post(
                 f"{ntfy_config['url']}/{ntfy_config['topic']}",
                 data=message,
-                headers=headers
+                headers=headers,
+                timeout=10
             )
         if response.status_code == 200:
             logger.info("Ntfy-Notification sent successfully")

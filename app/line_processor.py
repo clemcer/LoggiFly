@@ -293,8 +293,8 @@ class LogProcessor:
         def get_keyword_setting(key: str, default: Any = None) -> Any:
             if keyword_dict.get(key) is not None:
                 return keyword_dict[key]
-            elif val := self.target_config_dict.get(key, None) is not None:
-                return val
+            elif self.target_config_dict.get(key, None) is not None:
+                return self.target_config_dict[key]
             return default
 
         def make_group_key(items: tuple[dict]) -> tuple:
@@ -311,7 +311,7 @@ class LogProcessor:
                 match = re.search(regex, log_line, re.IGNORECASE if not regex_case_sensitive else 0)
                 if match:
                     if self.keyword_tracker.record_match(regex, trigger_on):
-                        hide_pattern = get_keyword_setting("hide_regex_in_title", False)
+                        hide_pattern = get_keyword_setting("hide_full_regex", False)
                         return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
         elif keyword := keyword_dict.get("keyword"):
             if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(keyword, notification_cooldown):
@@ -321,17 +321,13 @@ class LogProcessor:
         elif keyword_group := keyword_dict.get("keyword_group"):
             key = make_group_key(keyword_group)
             if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(key, notification_cooldown):
-                for item in keyword_group:
-                    if item.get("keyword"):
-                        if item["keyword"].lower() in log_line.lower():
-                            if self.keyword_tracker.record_match(key, trigger_on):
-                                return key
-                            break
-                    elif item.get("regex"):
-                        if re.search(item["regex"], log_line, re.IGNORECASE if not regex_case_sensitive else 0):
-                            if self.keyword_tracker.record_match(key, trigger_on):
-                                return key
-                            break
+                all_matched = all(
+                    item["keyword"].lower() in log_line.lower() if item.get("keyword")
+                    else bool(re.search(item["regex"], log_line, re.IGNORECASE if not regex_case_sensitive else 0))
+                    for item in keyword_group
+                )
+                if all_matched and self.keyword_tracker.record_match(key, trigger_on):
+                    return key
         else:
             self.logger.error(f"No keyword or regex found for {keyword_dict}")
         return None
@@ -353,8 +349,8 @@ class LogProcessor:
                 if merge_matches is True:
                     # last override first
                     keyword_level_config = merge_with_precedence(
-                        precedence=keyword_level_config,
-                        fallback=keyword_dict,
+                        precedence=keyword_dict,
+                        fallback=keyword_level_config,
                         list_union=True,
                         dict_merge=True,
                     )

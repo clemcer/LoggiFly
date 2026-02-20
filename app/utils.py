@@ -13,8 +13,12 @@ class LogAttachment:
 
 
 def get_env_var(key: str, prefix: str = "LOGGIFLY_", fallback_value: str | None = None) -> str | None:
+    """
+    Look up an env var, checking the prefixed name first (e.g. LOGGIFLY_FOO before FOO).
+    The prefixed var can be set to an empty string to explicitly suppress the unprefixed one (in case of any conflicts).
+    """
     val = os.getenv(f"{prefix}{key}")
-    if val:
+    if val is not None:
         if not val.strip():
             return None
         return val

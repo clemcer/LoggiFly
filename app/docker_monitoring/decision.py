@@ -95,10 +95,12 @@ def is_matched_rule(rule: ContainerRule | SwarmRule, filter_mapping: dict[str, s
                 if matches_glob_list(v, pattern_list):
                     return False
     for k, v in filter_mapping.items():
-        if pattern_list := getattr(rule.match.include, k, None):
-            if matches_glob_list(v, pattern_list):
-                return True
-    return False
+        pattern_list = getattr(rule.match.include, k, None)
+        if pattern_list:
+            if not matches_glob_list(v, pattern_list):
+                return False
+    else:
+        return True
 
 
 def merge_rules_and_overlays(rules: List[ContainerRule | SwarmRule], overlays: List[ContainerRule | SwarmRule]) -> dict:
@@ -314,7 +316,7 @@ class MonitorDecision:
                 validated_label_config = validate_label_config(parsed, target_name)
 
                 if ignore_config:
-                    if validated_label_config:
+                    if validated_label_config is not None:
                         return cls(
                             result=cls.Result.MONITOR,
                             reason=f"monitored via {source_name} (config ignored)",
@@ -331,7 +333,7 @@ class MonitorDecision:
                             reason="skipped via 'loggifly.ignore_config' label and invalid label config",
                         )
 
-                if not validated_label_config:
+                if validated_label_config is None:
                     logger.error(
                         f"Failed to validate {source_name} config for {target_name}. "
                         f"Falling back to rule-based matching via regular config."
@@ -362,7 +364,7 @@ class MonitorDecision:
                 reason = f"monitored via {label_source} and rules ({matched_rule_ids})"
             else:
                 reason = f"monitored via rules ({matched_rule_ids})"
-        elif validated_label_config:
+        elif validated_label_config is not None:
             reason = f"monitored via {label_source} (no rules matched)"
         else:
             return cls(

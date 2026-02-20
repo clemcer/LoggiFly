@@ -277,8 +277,7 @@ def get_service_target_name(labels) -> str | None:
     if match:
         return f"{service_name}.{match.group(1)}"
     else:
-        return service_name or stack_name
-
+        return service_name
 
 def parse_label_config(labels: dict) -> dict[str, Any]:
     """Parse LoggiFly configuration from Docker labels."""

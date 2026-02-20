@@ -8,6 +8,9 @@ from config.models.base import SettingsConfig, RootDefaultsConfig, NotificationD
 from config.helpers import stringify_numbers, get_pretty_yaml_config
 from utils import get_env_var
 
+CONFIG_PATH = get_env_var("CONFIG_PATH", fallback_value="/config/config.yaml") or "/config/config.yaml"
+
+
 class ConfigLoadError(Exception):
     """Raised when config file exists but cannot be loaded or parsed"""
     pass
@@ -69,8 +72,8 @@ def override_with_env(cnf: dict) -> dict:
         key = key.lower()
         prefix = next((p for p in [nt.value for nt in NotificationPrefix] if key.startswith(p)), None)
         if prefix:
-            notification_type = prefix.rstrip("_") # ntfy_ -> ntfy
-            setting_key = key.replace(prefix, "") # ntfy_url -> url
+            notification_type = prefix.rstrip("_").lower() # NTFY_ -> ntfy
+            setting_key = key.replace(prefix, "").lower() # NTFY_URL -> url
             cnf["notifications"].setdefault(notification_type, {})
             cnf["notifications"][notification_type][setting_key] = env
 
@@ -120,7 +123,7 @@ def override_with_env(cnf: dict) -> dict:
     return cnf
 
 
-def load_config(path="/config/config.yaml"):
+def load_config(path: str = CONFIG_PATH):
     config_path = None
     yaml_config = None
     error_messages = []

@@ -199,7 +199,7 @@ class NotificationContext:
             self.trigger_on_timeframe = self.trigger_on.get("timeframe")
 
     def get_defaults(self) -> Dict[str, Any]:
-                # Convert Unix timestamp to datetime or use current time
+        # Convert Unix timestamp to datetime or use current time
         if self.time is not None:
             try:
                 dt = datetime.fromtimestamp(self.time)
