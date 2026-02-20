@@ -297,8 +297,8 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
             # Simple comma-separated keyword list
             if parts[0] == "keywords" and isinstance(value, str):
                 keywords_to_append = [kw.strip() for kw in value.split(",") if kw.strip()]
-            elif parts[0] == "excluded_keywords" and isinstance(value, str):
-                config["excluded_keywords"] = [kw.strip() for kw in value.split(",") if kw.strip()]
+            elif parts[0] == "ignore_keywords" and isinstance(value, str):
+                config["ignore_keywords"] = [kw.strip() for kw in value.split(",") if kw.strip()]
             elif parts[0] == "container_events" and isinstance(value, str):
                 container_events_to_append = [event.strip() for event in value.split(",") if event.strip()]
             # Top Level Fields (e.g. ntfy_topic, attach_logfile, etc.)
@@ -317,7 +317,7 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
                     keywords_by_index[index] = {}
                 if field == "keyword_group":
                     keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
-                elif field == "excluded_keywords":
+                elif field == "ignore_keywords":
                     keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
                 else:
                     keywords_by_index[index][field] = value
