@@ -47,32 +47,37 @@ def get_pretty_yaml_config(config, top_level_key=None):
     Returns:
         str: Pretty-formatted YAML string
     """
-    config_dict = prettify_config_dict(config.model_dump(
-        exclude_none=True, 
-        exclude_defaults=False, 
-        exclude_unset=False,
-    ))
+    config_dict = prettify_config_dict(
+        config.model_dump(
+            exclude_none=True, 
+            exclude_defaults=False, 
+            exclude_unset=False,
+        )
+    )
     if top_level_key:
         config_dict = {top_level_key: config_dict}
     return yaml.dump(config_dict, default_flow_style=False, sort_keys=False, indent=4)
 
 
-def prettify_config_dict(data):
+def prettify_config_dict(data, mask_secrets: bool = True):
     """
     Recursively format config dict for display, masking secrets and ordering keys for readability.
-    """
+    """ 
+    _PRIORITY_KEYS = (
+        "id", "enabled", "match", "container_name", "service_name", "stack_name",
+        "regex", "keyword", "all_of", "container_event", "container_action"
+        )
     if isinstance(data, dict):
-        # Put regex/keyword keys first for better readability
-        priority_keys = [k for k in ("regex", "keyword", "keyword_group", "event", "id", "enabled") if k in data]
+        priority_keys = [k for k in _PRIORITY_KEYS if k in data]
         if priority_keys:
             rest_keys = [k for k in data.keys() if k not in priority_keys]
             ordered_dict = {k: data[k] for k in priority_keys + rest_keys}
-            return {k: prettify_config_dict(v) for k, v in ordered_dict.items()}
-        return {k: prettify_config_dict(v) for k, v in data.items()}
+            return {k: prettify_config_dict(v, mask_secrets) for k, v in ordered_dict.items()}
+        return {k: prettify_config_dict(v, mask_secrets) for k, v in data.items()}
     elif isinstance(data, list):
-        return [prettify_config_dict(item) for item in data]
+        return [prettify_config_dict(item, mask_secrets) for item in data]
     elif isinstance(data, SecretStr):
-        return "**********"  
+        return "**********" if mask_secrets else data.get_secret_value()
     else:
         return data
 
@@ -90,8 +95,8 @@ def stringify_numbers(data) -> Any:
 
 def discriminate_keyword_type(v: Any):
     if isinstance(v, dict):
-        return next(key for key in ["keyword", "regex", "keyword_group"] if key in v)
-    return next(key for key in ["keyword", "regex", "keyword_group"] if hasattr(v, key))
+        return next(key for key in ["keyword", "regex", "all_of"] if key in v)
+    return next(key for key in ["keyword", "regex", "all_of"] if hasattr(v, key))
 
 
 
@@ -112,15 +117,15 @@ def validate_regex(v):
 
 def get_kw_or_rgx(item):
     """
-    Extract the keyword, regex, or keyword_group from a config item for error reporting.
+    Extract the keyword, regex, or all_of from a config item for error reporting.
     """
     if isinstance(item, dict):
         if "keyword" in item:
             return f"keyword: '{item['keyword']}'"
         elif "regex" in item:
             return f"regex: '{item['regex']}'"
-        elif "keyword_group" in item:
-            return f"keyword_group: '{item['keyword_group']}'"
+        elif "all_of" in item:
+            return f"all_of: '{item['all_of']}'"
     return "unknown"
 
 
@@ -130,8 +135,8 @@ def validate_keywords(keywords: list[Any]) -> list[Any]:
         if isinstance(item, dict):
             keys = list(item.keys())
 
-            if len(set(keys) & {"keyword", "regex", "keyword_group"}) != 1:
-                handle_error(f"keywords.{idx}: You have to set exactly one of 'keyword', 'regex' or 'keyword_group' as a key: {item}.")
+            if len(set(keys) & {"keyword", "regex", "all_of"}) != 1:
+                handle_error(f"keywords.{idx}: You have to set exactly one of 'keyword', 'regex' or 'all_of' as a key: {item}.")
                 continue
 
             if "keyword" in item:
@@ -140,12 +145,12 @@ def validate_keywords(keywords: list[Any]) -> list[Any]:
                 if not validate_regex(item["regex"]):
                     handle_error(f"keywords.{idx}.regex: Invalid regex: {item['regex']}.")
                     continue
-            elif "keyword_group" in item:
-                if not isinstance(item["keyword_group"], list):
-                    handle_error(f"keywords.{idx}.keyword_group: You have to set 'keyword_group' as a list: {item['keyword_group']}.")
+            elif "all_of" in item:
+                if not isinstance(item["all_of"], list):
+                    handle_error(f"keywords.{idx}.all_of: You have to set 'all_of' as a list: {item['all_of']}.")
                     continue
             else:
-                handle_error(f"keywords.{idx}: You have to set 'keyword', 'regex' or 'keyword_group' as a key: {item}.")
+                handle_error(f"keywords.{idx}: You have to set 'keyword', 'regex' or 'all_of' as a key: {item}.")
                 continue
             converted.append(item)
         elif isinstance(item, (str, int)):
@@ -230,7 +235,7 @@ def validate_container_action(value, monitor_type: MonitorType | None) -> str | 
     return value
 
 
-def validate_action_cooldown(v):
+def validate_container_action_cooldown(v):
     """
     Validate action cooldown value with minimum threshold enforcement.
     """

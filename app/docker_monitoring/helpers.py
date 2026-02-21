@@ -315,7 +315,7 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
                 field = parts[2]
                 if index not in keywords_by_index:
                     keywords_by_index[index] = {}
-                if field == "keyword_group":
+                if field == "all_of":
                     keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
                 elif field == "ignore_keywords":
                     keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]

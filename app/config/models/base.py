@@ -12,7 +12,7 @@ from typing import Literal, Optional, List, Union, Annotated, Dict, Any
 from contextvars import ContextVar
 import logging
 from config.helpers import (
-    validate_action_cooldown,
+    validate_container_action_cooldown,
     validate_ntfy_actions,
     validate_and_filter_olivetin_actions,
     validate_keywords,
@@ -86,16 +86,6 @@ SimpleKeywords = List[
             Annotated[SimpleRegex, Tag("regex")],
         ],
     Discriminator(discriminate_keyword_type)]]
-
-# class SimpleKeywords(RootModel[List[SimpleKeyword | SimpleRegex]]):
-#     def as_tuple(self, *, ignore_order: bool = False) -> tuple[str, ...]:
-#         parts = []
-#         for it in self.root:
-#             if isinstance(it, SimpleKeyword):
-#                 parts.append(it.keyword)
-#             elif isinstance(it, SimpleRegex):
-#                 parts.append(it.regex)
-#         return tuple(parts)
 
 class NtfyViewAction(BaseConfigModel):
     action: Literal["view"] = "view"
@@ -175,15 +165,15 @@ class EmptyDefaults(NotificationDefaults):
 
 
 class ActionCooldownMixin:
-    @field_validator("action_cooldown", mode="before")             
-    def validate_action_cooldown(cls, v):                          
-        return validate_action_cooldown(v)                         
+    @field_validator("container_action_cooldown", mode="before")             
+    def validate_container_action_cooldown(cls, v):                          
+        return validate_container_action_cooldown(v)                         
 
 class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
 
     attach_logfile: Optional[bool] = None
     trigger_cooldown: Optional[int] = None
-    action_cooldown: Optional[int] = None
+    container_action_cooldown: Optional[int] = None
     attachment_lines: Optional[int] = None
     hide_full_regex: Optional[bool] = None
     regex_case_sensitive: Optional[bool] = None
@@ -192,8 +182,8 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
 
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     attach_logfile: bool = False
-    trigger_cooldown: int = 5
-    action_cooldown: int = 60
+    trigger_cooldown: int = 0
+    container_action_cooldown: int = 60
     attachment_lines: int = 20
     hide_full_regex: bool = False
     regex_case_sensitive: bool = True
@@ -321,18 +311,18 @@ class KeywordItem(TriggerActionsBase):
     keyword: str
 
 
-class KeywordGroup(TriggerActionsBase):
+class AllOfKeywords(TriggerActionsBase):
     """
-    Model for a group of keywords that must all be present in a log line.
-    All keywords in the group must match for the group to trigger.
+    Model for a list of keywords/regexes that must all be present in a log line.
+    All items in the list must match for the list to trigger.
     """
-    keyword_group: SimpleKeywords
+    all_of: SimpleKeywords
 
 
-    @field_validator("keyword_group", mode="before")
-    def validate_keyword_group(cls, v):
+    @field_validator("all_of", mode="before")
+    def validate_all_of(cls, v):
         if v and isinstance(v, list):
-            v = validate_simple_keywords(v, "keyword_group")
+            v = validate_simple_keywords(v, "all_of")
         return v
 
 class KeywordBase(BaseConfigModel):
@@ -343,7 +333,7 @@ class KeywordBase(BaseConfigModel):
             Union[
                 Annotated[KeywordItem, Tag("keyword")], 
                 Annotated[RegexItem, Tag("regex")], 
-                Annotated[KeywordGroup, Tag("keyword_group")]],
+                Annotated[AllOfKeywords, Tag("all_of")]],
             Discriminator(discriminate_keyword_type)
         ]
     ] | None = None # TODO: optional or not?

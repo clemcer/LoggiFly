@@ -261,13 +261,13 @@ class LogProcessor:
                 if keyword.lower() in log_line.lower():
                     if self.keyword_tracker.record_match(keyword, trigger_on):
                         return keyword
-        elif keyword_group := keyword_dict.get("keyword_group"):
-            key = make_group_key(keyword_group)
+        elif all_of := keyword_dict.get("all_of"):
+            key = make_group_key(all_of)
             if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(key, trigger_cooldown):
                 all_matched = all(
                     item["keyword"].lower() in log_line.lower() if item.get("keyword")
                     else bool(re.search(item["regex"], log_line, re.IGNORECASE if not regex_case_sensitive else 0))
-                    for item in keyword_group
+                    for item in all_of
                 )
                 if all_matched and self.keyword_tracker.record_match(key, trigger_on):
                     return key

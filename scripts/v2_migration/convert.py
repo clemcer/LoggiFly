@@ -6,24 +6,13 @@ import argparse
 import yaml
 import sys
 from typing import Any, cast
-import logging
 import copy
 import os
 from pydantic import ValidationError, SecretStr
-from load_configv1 import convert_legacy_formats, load_config, ConfigLoadError
+from load_configv1 import load_config
 from config.models.base import RootDefaultsConfig, SettingsConfig # type: ignore
 from config.models.root import GlobalConfig # type: ignore
-
-logging.basicConfig(
-    level="DEBUG",
-    format="%(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
-
-logger = logging.getLogger(__name__)
-
+from config.helpers import prettify_config_dict # type: ignore
 
 class MyDumper(yaml.Dumper):
 
@@ -43,6 +32,8 @@ FIELD_RENAMES = {
     "hide_regex_in_title": "hide_full_regex",
     "excluded_keywords": "ignore_keywords",
     "notification_cooldown": "trigger_cooldown",
+    "keyword_group": "all_of",
+    "action_cooldown": "container_action_cooldown",
 }
 
 DEPRECATED_FIELDS = [
@@ -347,7 +338,7 @@ IMPORTANT: If you see warnings during validation they refer to invalid fields in
     try:
         configv1_8, _ = load_config(path)
     except Exception as e:
-        logger.error(f"Error loading config: {e}")
+        _log_message(f"Error loading/validating v1 config: {e}")
         # trace
         import traceback
         traceback.print_exc()
@@ -411,9 +402,9 @@ If you see any warnings during validation make sure that no important settings a
 
     os.environ["STRICT_CONFIG"] = "false"
     try:
-        GlobalConfig.model_validate(output)
+        validated_output = GlobalConfig.model_validate(output).model_dump(exclude_none=True)
     except ValidationError as e:
-        logger.error(f"Error validating config: {e}")
+        _log_message(f"Error validating config: {e}")
         sys.exit(1)
     
     output = cast(dict[str, Any], _convert_secretstr(output))
@@ -427,9 +418,15 @@ If you see any warnings during validation make sure that no important settings a
     ]
 
     output = {key: output[key] for key in preferred_order if key in output}
+    try:
+        output = prettify_config_dict(output, mask_secrets=False)
+    except Exception as e:
+        _log_message(f"Error prettifying config: {e}")
+        sys.exit(1)
 
+    yaml_str = yaml.dump(output, Dumper=MyDumper, sort_keys=False)
     with open(output_path, "w") as f:
-        yaml.dump(output, f, Dumper=MyDumper)
+        f.write(yaml_str)
     return output
 
 
