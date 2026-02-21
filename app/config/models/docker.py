@@ -12,6 +12,7 @@ from config.models.base import (
     ModularDefaultsConfig,
     TriggerActionsBase,
     _validation_ctx,
+    TriggerOnBase,
 )
 from config.helpers import (
     validate_container_events,
@@ -28,7 +29,7 @@ class ScopeConfig(BaseConfigModel):
     hosts: Optional[List[str]] = None
 
 
-class ContainerEventConfig(TriggerActionsBase):
+class ContainerEventConfig(TriggerActionsBase, TriggerOnBase):
     event: Literal[*SUPPORTED_CONTAINER_EVENTS] # type: ignore
 
 

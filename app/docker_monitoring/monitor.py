@@ -19,7 +19,7 @@ from constants import (
     NotificationType,
     SUPPORTED_CONTAINER_ACTIONS,
 )
-from utils import convert_to_int, merge_trigger_context, get_env_var
+from utils import convert_to_int, merge_trigger_context, get_env_var, TriggerTracker
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.helpers import (
@@ -236,6 +236,8 @@ class DockerLogMonitor:
         self.last_action_time_per_container = {}
         self.last_action_lock = threading.Lock()
         self._registry = MonitoredContainerRegistry()
+
+        self.event_trigger_tracker = TriggerTracker(logger=self.logger, trigger_type="container_event")
 
         self.configured_stale_threshold_hours = convert_to_int(get_env_var("CLEANUP_THRESHOLD_HOURS_CONFIGURED"), fallback_value=24*7)
         self.stale_threshold_hours = convert_to_int(get_env_var("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED"), fallback_value=24)
@@ -722,6 +724,19 @@ class DockerLogMonitor:
 
         trigger_level_config = ce.model_dump(exclude_none=True)
         trigger_context = merge_trigger_context(trigger_level_config, ctx.target_config_dict)
+
+        trigger_cooldown = trigger_context.get("trigger_cooldown")
+        assert trigger_cooldown is not None, "trigger_cooldown must be set"
+        if self.event_trigger_tracker.is_on_cooldown(event_type, trigger_cooldown):
+            self.logger.debug(f"Event {event_type} for container {ctx.target_name} is on cooldown. Skipping trigger.")
+            return
+        trigger_on = trigger_level_config.get("trigger_on")
+        if self.event_trigger_tracker.record_match(event_type, trigger_on):
+            self.logger.debug(f"Event {event_type} for container {ctx.target_name} triggered. Processing trigger.")
+        else:
+            self.logger.debug(f"Event {event_type} for container {ctx.target_name} not triggered. Skipping trigger.")
+            return
+
         exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
         signal = event.get("Actor", {}).get("Attributes", {}).get("signal", None)
 

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class MyDumper(yaml.Dumper):
-    
+
     # don't use yaml anchors
     # def ignore_aliases(self, data):
     #       return True
@@ -42,6 +42,7 @@ FIELD_RENAMES = {
     "action": "container_action",
     "hide_regex_in_title": "hide_full_regex",
     "excluded_keywords": "ignore_keywords",
+    "notification_cooldown": "trigger_cooldown",
 }
 
 DEPRECATED_FIELDS = [

@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 import logging
 import os
+from threading import Lock
+import time
+from typing import Literal
 
 
 logger = logging.getLogger(__name__)
@@ -10,6 +13,67 @@ logger = logging.getLogger(__name__)
 class LogAttachment:
     content: str
     file_name: str
+
+
+class TriggerTracker:
+    """
+    Thread-safe tracker for trigger match state.
+    Use for both log matches (line_processor.py) and container events (docker_monitoring/monitor.py)
+    Handles both simple cooldown (single last-trigger timestamp) and
+    threshold-based triggering (sliding window of match timestamps).
+    """
+
+    def __init__(self, logger, trigger_type: Literal["keyword", "container_event"]):
+        self.logger = logger
+        self._lock = Lock()
+        self._last_trigger: dict[str | tuple, float] = {}
+        self._match_history: dict[str | tuple, list[float]] = {}
+        self._trigger_type = trigger_type
+
+    def is_on_cooldown(self, key: str | tuple, cooldown: int) -> bool:
+        """Check if the keyword is still within its trigger_cooldown period."""
+        with self._lock:
+            last = self._last_trigger.get(key, 0)
+            return (time.time() - last) < cooldown
+
+    def record_match(self, key: str | tuple, trigger_on: dict | None) -> bool:
+        """
+        Record a trigger match (log match or container event)and determine whether to trigger.
+
+        Without trigger_on: triggers immediately (returns True) and stores the current time.
+        With trigger_on: adds the timestamp to a sliding window and only triggers
+        when `count` matches have occurred within the last `timeframe` seconds.
+        On trigger the match history is cleared so the count starts fresh.
+
+        Returns:
+            True if the trigger should fire, False if the match was recorded
+            but the threshold has not been reached yet.
+        """
+        now = time.time()
+        with self._lock:
+            if trigger_on is None:
+                self._last_trigger[key] = now
+                return True
+
+            count = trigger_on["count"]
+            timeframe = trigger_on["timeframe"]
+            assert isinstance(count, int) and isinstance(timeframe, int), "count and timeframe must be integers"
+
+            history = self._match_history.setdefault(key, [])
+            history.append(now)
+
+            # Prune timestamps outside the sliding window
+            cutoff = now - timeframe
+            history[:] = [t for t in history if t > cutoff]
+
+            if len(history) >= count:
+                self._last_trigger[key] = now
+                history.clear()
+                return True
+            self.logger.debug(f"{self._trigger_type} '{key}' matched {len(history)} times in the last {timeframe} seconds. {count - len(history)} more matches needed to trigger.")
+
+            return False
+
 
 
 def get_env_var(key: str, prefix: str = "LOGGIFLY_", fallback_value: str | None = None) -> str | None:

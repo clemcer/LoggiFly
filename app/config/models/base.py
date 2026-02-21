@@ -22,6 +22,7 @@ from config.helpers import (
     strict_config_validation,
     validate_container_action,
     discriminate_keyword_type,
+    validate_trigger_on,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,7 @@ class ActionCooldownMixin:
 class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
 
     attach_logfile: Optional[bool] = None
-    notification_cooldown: Optional[int] = None
+    trigger_cooldown: Optional[int] = None
     action_cooldown: Optional[int] = None
     attachment_lines: Optional[int] = None
     hide_full_regex: Optional[bool] = None
@@ -191,7 +192,7 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
 
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     attach_logfile: bool = False
-    notification_cooldown: int = 5
+    trigger_cooldown: int = 5
     action_cooldown: int = 60
     attachment_lines: int = 20
     hide_full_regex: bool = False
@@ -292,9 +293,15 @@ class TriggerOnConfig(BaseConfigModel):
     """
     count: int = Field(ge=2)
     timeframe: int = Field(ge=1)
+    
+class TriggerOnBase(BaseConfigModel):
+    trigger_on: Optional[TriggerOnConfig] = None
 
+    @field_validator("trigger_on", mode="before")
+    def validate_trigger_on(cls, v):
+        return validate_trigger_on(v)
 
-class TriggerActionsBase(ModularDefaultsConfig, TriggerActions):
+class TriggerActionsBase(ModularDefaultsConfig, TriggerActions, TriggerOnBase):
     """Base class for keyword items with common fields for actions and templates."""
     pass
 
@@ -305,7 +312,6 @@ class RegexItem(TriggerActionsBase):
     Template allows for notification formatting using named capturing groups.
     """
     regex: str
-    trigger_on: Optional[TriggerOnConfig] = None
 
 
 class KeywordItem(TriggerActionsBase):
@@ -313,7 +319,6 @@ class KeywordItem(TriggerActionsBase):
     Model for a string-based keyword with optional settings.
     """
     keyword: str
-    trigger_on: Optional[TriggerOnConfig] = None
 
 
 class KeywordGroup(TriggerActionsBase):
@@ -322,7 +327,6 @@ class KeywordGroup(TriggerActionsBase):
     All keywords in the group must match for the group to trigger.
     """
     keyword_group: SimpleKeywords
-    trigger_on: Optional[TriggerOnConfig] = None
 
 
     @field_validator("keyword_group", mode="before")

@@ -331,6 +331,31 @@ def validate_ntfy_actions(actions: list[Any]) -> list[dict]:
         filtered_actions.append(raw)
     return filtered_actions
 
+def validate_trigger_on(v: Any) -> dict | None:
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        handle_error(f"trigger_on: Must be a dictionary with 'count' and 'timeframe' keys. You set '{v}'.")
+        return None
+    count = v.get("count")
+    timeframe = v.get("timeframe")
+    if count is None or timeframe is None:
+        handle_error(f"trigger_on: count and timeframe are required. You set '{v}'.")
+        return None
+    try:
+        count = int(count)
+        timeframe = int(timeframe)
+    except ValueError:
+        handle_error(f"trigger_on: count and timeframe must be integers. You set '{v}'.")
+        return None
+    if count < 2:
+        handle_error(f"trigger_on: count must be at least 2. You set '{v}'.")
+        return None
+    if timeframe < 1:
+        handle_error(f"trigger_on: timeframe must be at least 1. You set '{v}'.")
+        return None
+    return {"count": count, "timeframe": timeframe}
+
 
 def validate_and_generate_ids(data: Any, source_name: str) -> Any:
 
