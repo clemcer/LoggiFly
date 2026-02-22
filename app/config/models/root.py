@@ -2,6 +2,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     field_validator,
+    Field,
 )
 from typing import Optional, Literal
 from config.models.base import (
@@ -14,13 +15,14 @@ from config.models.docker import ContainerSourceConfig, SwarmSourceConfig
 
 
 class GlobalConfig(BaseConfigModel):
-    version: Literal[2] = 2
-    containers: Optional[ContainerSourceConfig] = None
-    swarm: Optional[SwarmSourceConfig] = None
-    notifications: NotificationsConfig = NotificationsConfig()
-    defaults: RootDefaultsConfig = RootDefaultsConfig()
-    settings: SettingsConfig = SettingsConfig()
-    
+    """Root configuration model for LoggiFly."""
+    version: Literal[2] = Field(2, description="Config schema version. Must be `2`.")
+    containers: Optional[ContainerSourceConfig] = Field(None, description="Configuration for Docker container monitoring.")
+    swarm: Optional[SwarmSourceConfig] = Field(None, description="Configuration for Docker Swarm service monitoring.")
+    notifications: NotificationsConfig = Field(NotificationsConfig(), description="Notification service configuration (ntfy, apprise, webhook).")  # type: ignore[call-arg]
+    defaults: RootDefaultsConfig = Field(RootDefaultsConfig(), description="Global default settings applied to all rules unless overridden.")  # type: ignore[call-arg]
+    settings: SettingsConfig = Field(SettingsConfig(), description="Application-wide settings.")  # type: ignore[call-arg]
+
     @field_validator("version", mode="before")
     def ensure_int_literal(cls, v):
         if isinstance(v, int):

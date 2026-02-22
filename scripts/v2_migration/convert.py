@@ -19,12 +19,21 @@ class MyDumper(yaml.Dumper):
     # don't use yaml anchors
     # def ignore_aliases(self, data):
     #       return True
-          
+
     def write_line_break(self, data=None):
         super().write_line_break(data)
         # add an extra line break after top level keys
         if len(self.indents) == 1:
             super().write_line_break()
+
+    def represent_str(self, data):
+        """Use | style for strings that contain newlines or tabs."""
+        unescaped = data.replace('\\n', '\n').replace('\\t', '\t')
+        if '\n' in unescaped:
+            return self.represent_scalar('tag:yaml.org,2002:str', unescaped, style='|')
+        return self.represent_scalar('tag:yaml.org,2002:str', data)
+
+MyDumper.add_representer(str, MyDumper.represent_str)
 
 
 FIELD_RENAMES = {
