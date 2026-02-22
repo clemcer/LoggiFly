@@ -1,6 +1,6 @@
-docker
-requests
-pyyaml
-watchdog
-apprise
-pydantic
+docker==7.1.0
+requests==2.32.5
+pyyaml==6.0.3
+watchdog==6.0.0
+apprise==1.9.7
+pydantic==2.12.5
