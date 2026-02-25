@@ -3,8 +3,9 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from string import Formatter
 from typing import Dict, Optional, List, Any
+
+from jinja2 import Environment, Undefined
 
 from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, MonitorType
 from monitoring.base import SourceMetadata
@@ -12,84 +13,22 @@ from monitoring.base import SourceMetadata
 logger = logging.getLogger(__name__)
 
 
-class SafeDict(dict):
-    """
-    dict subclass that remembers missing keys so callers can decide
-    whether to fall back to a default value.
-    """
+class _WarnUndefined(Undefined):
+    def __str__(self):
+        logger.warning(f"Template variable '{{{{ {self._undefined_name} }}}}' is not defined")
+        return ""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.missing_keys = set()
 
-    def __missing__(self, key):
-        self.missing_keys.add(key)
-        return "{" + key + "}"
+_jinja_env = Environment(undefined=_WarnUndefined)
 
-def _format_with_safe_dict(template: str, data: Dict[str, Any]) -> tuple[str, set]:
+
+def _render_template(template: str, data: Dict[str, Any]) -> str:
     try:
-        safe = SafeDict(data)
-        rendered = template.format_map(safe)
-        return rendered, safe.missing_keys
+        tmpl = _jinja_env.from_string(template)
+        return tmpl.render(**data)
     except Exception as e:
-        logger.warning(f"Template formatting failed: {e}. Attempting partial formatting.")
-    try:
-        rendered, missing = _partial_format(template, data)
-        logger.info(f"Partial formatting succeeded: {rendered}")
-        if missing:
-            logger.warning(f"Missing keys in partial formatting: {missing}")
-        return rendered, missing
-    except Exception as e:
-        logger.error(f"Partial formatting also failed: {e}")
-        return template, set()
-
-def _partial_format(template: str, data: Dict[str, Any]) -> tuple[str, set]:
-    """
-    Extract fields using Python's Formatter, test each individually, replace valid ones.
-    """
-    formatter = Formatter()
-    fields_to_test = []
-    seen_fields = set()
-
-    for literal_text, field_name, format_spec, conversion in formatter.parse(template):
-        # field_name is None for literal text portions (including escaped braces)
-        if field_name is None:
-            continue
-        full_field = field_name
-        if conversion:
-            full_field = f"{full_field}!{conversion}"
-        if format_spec:
-            full_field = f"{full_field}:{format_spec}"
-
-        if full_field not in seen_fields:
-            seen_fields.add(full_field)
-            fields_to_test.append(full_field)
-
-    # Test each unique field individually
-    valid_fields = {}
-    invalid_fields = []
-    all_missing_keys = set()
-
-    for field in fields_to_test:
-        test_template = f"{{{field}}}"
-        try:
-            safe = SafeDict(data)
-            result = test_template.format_map(safe)
-            valid_fields[field] = result
-            all_missing_keys.update(safe.missing_keys)
-        except (ValueError, KeyError, TypeError) as e:
-            invalid_fields.append((field, str(e)))
-            logger.warning(f"Invalid template field '{{{field}}}': {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error testing template field '{field}': {e}")
-            invalid_fields.append((field, str(e)))
-
-    # Replace valid fields in the original template
-    result = template
-    for field, value in valid_fields.items():
-        result = result.replace(f"{{{field}}}", value)
-
-    return result, all_missing_keys
+        logger.warning(f"Template rendering failed: {e}")
+        return template
 
 
 def extract_fields_from_json(log_line: str) -> Dict[str, Any]:
@@ -230,6 +169,7 @@ class NotificationContext:
             "log_entry": self.log_line,
             "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
             "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
+            "keywords_list": self.keywords_found,
             "trigger_on_count": self.trigger_on_count,
             "trigger_on_timeframe": self.trigger_on_timeframe,
 
@@ -288,10 +228,7 @@ def render_title(
     context_dict = ctx.to_dict()
     title = None
     if template:
-        rendered, missing = _format_with_safe_dict(template, context_dict)
-        if missing:
-            logging.warning(f"Missing keys in title template: {missing}.")
-        title = rendered
+        title = _render_template(template, context_dict)
 
     # Default when no template is provided
     if not title:
@@ -300,10 +237,9 @@ def render_title(
         elif ctx.notification_type == NotificationType.DOCKER_EVENT:
             if ctx.event:
                 logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')}")
-                title, missing = _format_with_safe_dict(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
-                if missing:
+                title = _render_template(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
+                if not title:
                     title = fallback_title_for_event(ctx.target_name, ctx.event)
-                    logging.warning(f"Missing keys in event default title template: {missing}.")
 
         # Prepend host identifier to title (only exists for multi-host or swarm setups)
         if ctx.host_identifier:
@@ -332,16 +268,12 @@ def render_message(
 
     if template:
         logger.debug(f"Rendering message with template: {template}")
-        rendered, missing = _format_with_safe_dict(template, context_dict)
-        if missing:
-            logging.warning(f"Missing keys in message template: {missing}.")
-        return rendered
+        return _render_template(template, context_dict)
     # Fallback default message for events
     if ctx.notification_type == NotificationType.DOCKER_EVENT:
         if ctx.event in MAP_EVENT_TO_MESSAGE:
-            rendered, missing = _format_with_safe_dict(MAP_EVENT_TO_MESSAGE[ctx.event], context_dict)
-            if not missing:
+            rendered = _render_template(MAP_EVENT_TO_MESSAGE[ctx.event], context_dict)
+            if rendered:
                 return rendered
-            logging.warning(f"Missing keys in default event message template: {missing}. Falling back to default message.")
     # Fallback
     return default_message or ctx.log_line or ""

@@ -314,8 +314,8 @@ class LogProcessor:
                 return
         trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
         formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(log_line.splitlines()) + "\n   -----------------------"
-        k = "keyword" if len(keywords_found) == 1 else "keywords"
-        self.logger.info(f"The following {k} were found in {self.target_name}: {keywords_found}."
+        k = "keyword was found" if len(keywords_found) == 1 else "keywords were found"
+        self.logger.info(f"The following {k} in {self.target_name}: {keywords_found}."
                     + (f" (A Log FIle will be attached)" if trigger_context.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )

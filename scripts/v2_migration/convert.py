@@ -3,6 +3,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent / "app"))
 
 import argparse
+import re
 import yaml
 import sys
 from typing import Any, cast
@@ -19,6 +20,9 @@ class MyDumper(yaml.Dumper):
     # don't use yaml anchors
     # def ignore_aliases(self, data):
     #       return True
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow=flow, indentless=False)
 
     def write_line_break(self, data=None):
         super().write_line_break(data)
@@ -114,16 +118,16 @@ def _convert_hosts_containers_section(hosts: dict) -> list[dict]:
 
         # Handle host-level monitor_all
         if host_monitor_all:
-            rules.append(
-                {
+            r = {
                     "id": f"monitor-all-on-{host_name}",
                     "scope": {"hosts": [host_name]},
                     "match": {
                         "include": {"container_names": ["*"]},
-                        "exclude": {"container_names": host_excluded}
                         },
                 }
-            )
+            if host_excluded:
+                r["match"]["exclude"] = {"container_names": host_excluded}
+            rules.append(r)
             _log_message(
                 f"Converted hosts.{host_name}.monitor_all_containers to scoped rule"
             )
@@ -138,6 +142,7 @@ def _convert_hosts_containers_section(hosts: dict) -> list[dict]:
                 container_config = {}
 
             rule = {
+                "id": f"{container_name}-on-{host_name}",
                 "container_name": container_name,
                 "scope": {"hosts": [host_name]},
             }
@@ -201,6 +206,7 @@ def _convert_swarm(
                 config = {}
             rule: dict[str, Any] = {}
             rule["service_name"] = name
+            rule["id"] = f"{name}"
             # Handle hosts field -> scope
             hosts = config.pop("hosts", None)
             if isinstance(hosts, str):
@@ -265,6 +271,7 @@ def _convert_containers(
                 config = {}
             rule: dict[str, Any] = {}
             rule["container_name"] = name
+            rule["id"] = f"{name}"
             # Handle hosts field -> scope
             hosts = config.pop("hosts", None)
             if isinstance(hosts, str):
@@ -292,6 +299,65 @@ def _convert_containers(
         return None
 
     return output
+
+def _migrate_template_syntax(template: str) -> str:
+    """Convert {var} / {dict[key]} Python format_map syntax to Jinja2 {{ var }} syntax."""
+
+    def convert_match(m):
+        raw = m.group(1)  # everything inside the outer braces
+
+        # Strip conversion flags (!r, !s, !a) with warning
+        bracket_pos_for_flag = raw.find('[')
+        root_for_flag = raw if bracket_pos_for_flag == -1 else raw[:bracket_pos_for_flag]
+        if '!' in root_for_flag:
+            flag_idx = root_for_flag.index('!')
+            flag = root_for_flag[flag_idx + 1:flag_idx + 2]
+            _log_message(f"WARNING: Conversion flag '!{flag}' in template field '{{{raw}}}' is not supported in Jinja2 and was dropped.")
+            raw = root_for_flag[:flag_idx] + (raw[bracket_pos_for_flag:] if bracket_pos_for_flag != -1 else "")
+
+        # Strip format spec (:...) — only on root field (before first [)
+        bracket_pos = raw.find('[')
+        root = raw if bracket_pos == -1 else raw[:bracket_pos]
+        rest = '' if bracket_pos == -1 else raw[bracket_pos:]
+        if ':' in root:
+            root, _, spec = root.partition(':')
+            _log_message(f"WARNING: Format spec ':{spec}' in template field '{{{raw}}}' is not supported in Jinja2 and was dropped.")
+        raw = root + rest
+
+        # Convert bracket access to dot/subscript notation
+        parts = re.split(r'\[([^\]]+)\]', raw)
+        result = parts[0]  # root field name
+        for i in range(1, len(parts), 2):
+            key = parts[i]
+            if key.isdigit():
+                result += f'[{key}]'
+            elif key.isidentifier():
+                result += f'.{key}'
+            else:
+                result += f"['{key}']"
+
+        return '{{ ' + result + ' }}'
+
+    # Match {field}, {field[key]}, etc. but not {{ or }} (escaped braces)
+    return re.sub(r'(?<!\{)\{([a-zA-Z_]\w*(?:\[[^\]]*\])*(?:![rsa])?(?::[^}]*)?)\}(?!\})', convert_match, template)
+
+
+def _migrate_templates_in_config(config: Any) -> Any:
+    """Recursively walk config and migrate title_template / message_template values."""
+    if isinstance(config, dict):
+        for key, value in config.items():
+            if key in ("title_template", "message_template") and isinstance(value, str):
+                migrated = _migrate_template_syntax(value)
+                if migrated != value:
+                    _log_message(f"Migrated template syntax in '{key}': {value!r} -> {migrated!r}")
+                config[key] = migrated
+            else:
+                _migrate_templates_in_config(value)
+    elif isinstance(config, list):
+        for item in config:
+            _migrate_templates_in_config(item)
+    return config
+
 
 def _log_phase(message: str):
     sep = "=" * 100
@@ -364,6 +430,9 @@ IMPORTANT: If you see warnings during validation they refer to invalid fields in
         renamed_fields_config = _migrate_field_names(renamed_fields_config, key, value)
     
 
+    _log_phase("Phase 0.6: Migrating template syntax from {var} to {{ var }} (Jinja2)...")
+    renamed_fields_config = _migrate_templates_in_config(renamed_fields_config)
+
     v1_settings = renamed_fields_config.get("settings", {})
     output: dict[str, Any] = {}
 
@@ -414,6 +483,8 @@ If you see any warnings during validation make sure that no important settings a
         validated_output = GlobalConfig.model_validate(output).model_dump(exclude_none=True)
     except ValidationError as e:
         _log_message(f"Error validating config: {e}")
+        _log_message(f"Error details: {e.errors()}")
+        _log_message(f"Config: {output}")
         sys.exit(1)
     
     output = cast(dict[str, Any], _convert_secretstr(output))
@@ -433,7 +504,7 @@ If you see any warnings during validation make sure that no important settings a
         _log_message(f"Error prettifying config: {e}")
         sys.exit(1)
 
-    yaml_str = yaml.dump(output, Dumper=MyDumper, sort_keys=False)
+    yaml_str = yaml.dump(output, Dumper=MyDumper, sort_keys=False, indent=2)
     with open(output_path, "w") as f:
         f.write(yaml_str)
     return output

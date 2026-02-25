@@ -154,8 +154,8 @@ class NotificationDefaults(BaseConfigModel):
 class EmptyDefaults(NotificationDefaults):
     """Shared optional settings for notifications and template customization."""
     ignore_keywords: Optional[SimpleKeywords] = Field(None, description="Keywords or regexes to suppress — matching log lines will not trigger notifications.")
-    title_template: Optional[str] = Field(None, description="Template for the notification title. Use `{variable}` placeholders (e.g. `{container_name}`, `{keyword}`).")
-    message_template: Optional[str] = Field(None, description="Template for the notification message body. Use `{variable}` placeholders (e.g. `{log_entry}`, `{keyword}`).")
+    title_template: Optional[str] = Field(None, description="Jinja2 template for the notification title. Use `{{ variable }}` placeholders (e.g. `{{ container_name }}`, `{{ keyword }}`).")
+    message_template: Optional[str] = Field(None, description="Jinja2 template for the notification message body. Use `{{ variable }}` placeholders (e.g. `{{ log_entry }}`, `{{ keyword }}`).")
     olivetin_url: Optional[str] = Field(None, description="Base URL of the OliveTin instance to trigger actions on.")
     olivetin_username: Optional[str] = Field(None, description="Username for OliveTin authentication.")
     olivetin_password: Optional[SecretStr] = Field(None, description="Password for OliveTin authentication.")
