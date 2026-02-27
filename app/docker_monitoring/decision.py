@@ -103,10 +103,10 @@ def is_matched_rule(rule: ContainerRule | SwarmRule, filter_mapping: dict[str, s
         return True
 
 
-def merge_rules_and_overlays(rules: List[ContainerRule | SwarmRule], overlays: List[ContainerRule | SwarmRule]) -> dict:
-    """Merge matched rules and overlays into a single config dict. Later entries take precedence."""
+def merge_rules(rules: List[ContainerRule | SwarmRule]) -> dict:
+    """Merge matched rules into a single config dict. Later entries take precedence."""
     result = {}
-    for ro in rules + overlays:
+    for ro in rules:
         result = merge_with_precedence(
             precedence=ro.model_dump(exclude_none=True, exclude=_RULE_META_FIELDS),
             fallback=result,
@@ -121,7 +121,7 @@ def create_target_config(
     source_config: ContainerSourceConfig | SwarmSourceConfig | None,
     global_config: GlobalConfig,
 ) -> EffectiveTargetConfig:
-    """Build the effective target config by merging: global defaults < source defaults < rules/overlays < labels."""
+    """Build the effective target config by merging: global defaults < source defaults < rules < labels."""
     global_config_dict = global_config.model_dump(exclude_none=True)
     source_config_dict = source_config.model_dump(exclude_none=True) if source_config else {}
 
@@ -135,7 +135,6 @@ def create_target_config(
         ),
     )
 
-    logger.debug(f"Created the following defaults for {snapshot.target_name}: {defaults}")
     effective = {
         "keywords": keywords,
         "container_events": container_events,
@@ -145,7 +144,6 @@ def create_target_config(
         effective = merge_with_precedence(precedence=validated_label_config, fallback=effective)
 
     effective_target_config = EffectiveTargetConfig.model_validate(effective)
-    logger.debug(f"Effective target config for {snapshot.target_name}:\n{get_pretty_yaml_config(effective_target_config, top_level_key=snapshot.target_name)}")
     return effective_target_config
 
 
@@ -154,7 +152,6 @@ class MonitorDecision:
     result: 'MonitorDecision.Result'
     reason: str = ""
     matched_rules: List[str] | None = None
-    matched_overlays: List[str] | None = None
     target_config: EffectiveTargetConfig | None = None
     labels_applied: bool = False
 
@@ -191,7 +188,6 @@ class MonitorDecision:
           3. never_monitor (absolute exclusion)
           4. scope (host filtering)
           5. Rules (selection into monitoring)
-          6. Overlays (additional config for already-selected targets)
         """
         if snapshot.is_swarm_service:
             return cls._evaluate_swarm(snapshot, global_config, hostname)
@@ -361,9 +357,9 @@ class MonitorDecision:
         # 5. Determine if target should be monitored
         if rules:
             if label_decision == LabelDecision.MONITOR:
-                reason = f"monitored via {label_source} and rules ({matched_rule_ids})"
+                reason = f"monitored via {label_source} and rules {tuple(matched_rule_ids)}"
             else:
-                reason = f"monitored via rules ({matched_rule_ids})"
+                reason = f"monitored via rules {tuple(matched_rule_ids)}"
         elif validated_label_config is not None:
             reason = f"monitored via {label_source} (no rules matched)"
         else:
@@ -372,16 +368,8 @@ class MonitorDecision:
                 reason="not in config and not monitored via labels",
             )
 
-        # 6. Collect overlays
-        overlays = []
-        if source_config and source_config.overlays:
-            for overlay in source_config.overlays:
-                if is_matched_rule(overlay, filter_mapping, hostname):
-                    overlays.append(overlay)
-        matched_overlay_ids = [overlay.id for overlay in overlays]
-
         # 7. Build effective config
-        merged_rule = merge_rules_and_overlays(rules, overlays)
+        merged_rule = merge_rules(rules)
         target_config = create_target_config(
             snapshot=snapshot,
             validated_label_config=validated_label_config,
@@ -394,7 +382,6 @@ class MonitorDecision:
             result=cls.Result.MONITOR,
             reason=reason,
             matched_rules=matched_rule_ids,
-            matched_overlays=matched_overlay_ids,
             target_config=target_config,
             labels_applied=validated_label_config is not None,
         )

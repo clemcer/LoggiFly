@@ -185,7 +185,7 @@ def _convert_swarm(
         rules.append(
             {
                 "id": "monitor-all",
-                "match": {"include": {"service_names": ["*"]}},
+                "service_name": "*",
             }
         )
         _log_message("Converted monitor_all_swarm_services to wildcard rule")
@@ -249,12 +249,18 @@ def _convert_containers(
         output["never_monitor"] = {"container_names": excluded_containers}
         _log_message(f"Converted excluded_containers to containers.never_monitor")
 
+    # Handle hosts section
+    hosts = old_config.get("hosts", {})
+    if hosts:
+        host_rules = _convert_hosts_containers_section(hosts)
+        rules = host_rules + rules
+
     # Handle monitor_all_containers
     if monitor_all_containers:
         rules.append(
             {
                 "id": "monitor-all",
-                "match": {"include": {"container_names": ["*"]}},
+                "container_name": "*",
             }
         )
         _log_message("Converted monitor_all_containers to wildcard rule")
@@ -285,11 +291,6 @@ def _convert_containers(
             rules.append(rule)
             _log_message(f"Converted container '{name}' to rule")
 
-    # Handle hosts section
-    hosts = old_config.get("hosts", {})
-    if hosts:
-        host_rules = _convert_hosts_containers_section(hosts)
-        rules.extend(host_rules)
 
     if rules:
         output["rules"] = rules
@@ -480,7 +481,7 @@ If you see any warnings during validation make sure that no important settings a
 
     os.environ["STRICT_CONFIG"] = "false"
     try:
-        validated_output = GlobalConfig.model_validate(output).model_dump(exclude_none=True)
+        GlobalConfig.model_validate(copy.deepcopy(output)).model_dump(exclude_none=True)
     except ValidationError as e:
         _log_message(f"Error validating config: {e}")
         _log_message(f"Error details: {e.errors()}")

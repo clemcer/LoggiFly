@@ -91,6 +91,9 @@ def get_env_var(key: str, prefix: str = "LOGGIFLY_", fallback_value: str | None 
         return val
     return fallback_value
 
+def is_true_env_var(val: str | None) -> bool:
+    return isinstance(val, str) and val.strip().lower() == "true"
+
 
 def _union_lists(first: list, second: list) -> list:
     """Return union preserving order with `first` items first."""

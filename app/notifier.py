@@ -195,7 +195,7 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
         "Priority": f"{ntfy_config.get('priority', 3)}"
     }
 
-    if ntfy_config.get("icon"):
+    if ntfy_config.get("icon") is not None:
         headers["Icon"] = ntfy_config.get("icon")
     else:
         headers["Icon"] = "https://raw.githubusercontent.com/clemcer/LoggiFly/refs/heads/main/docs/public/icon.png"
@@ -210,11 +210,11 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
     if ntfy_config.get('actions'):
         action_header = build_ntfy_action_header(ntfy_config.get('actions', []))
         headers["Actions"] = action_header
-    if ntfy_config.get("tags"):
+    if ntfy_config.get("tags") is not None:
         headers["Tags"] = ntfy_config.get("tags")
     if ntfy_config.get("click"):
         headers["Click"] = ntfy_config.get("click")
-    if ntfy_config.get("markdown"):
+    if ntfy_config.get("markdown") is not None:
         headers["Markdown"] = str(ntfy_config.get("markdown"))
     if ntfy_config.get("headers"):
         headers.update(ntfy_config.get("headers"))

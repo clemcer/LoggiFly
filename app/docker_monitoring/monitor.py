@@ -19,7 +19,7 @@ from constants import (
     NotificationType,
     SUPPORTED_CONTAINER_ACTIONS,
 )
-from utils import convert_to_int, merge_trigger_context, get_env_var, TriggerTracker
+from utils import convert_to_int, merge_trigger_context, get_env_var, TriggerTracker, is_true_env_var
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.helpers import (
@@ -33,6 +33,7 @@ from monitoring import (
     EffectiveTargetConfig, 
 )
 from config.models import GlobalConfig, ContainerEventConfig
+from config.helpers import get_pretty_yaml_config
 from docker_monitoring.decision import MonitorDecision
 class MonitoredContainerContext:
     """
@@ -326,11 +327,13 @@ class DockerLogMonitor:
 
         # Start monitoring
         target_name = snapshot.target_name
-        self.logger.debug(
-            f"Monitoring {target_name}: {decision.reason}\n"
-            f"Matched rules: {decision.matched_rules}\n"
-            f"Matched overlays: {decision.matched_overlays}"
-        )
+        dmd = is_true_env_var(get_env_var("DEBUG_MONITORING_DECISION", fallback_value="false"))
+        if dmd:
+            self.logger.debug(f"Monitoring {target_name}: {decision.reason}")
+            self.logger.debug(
+                f"Effective target config for {snapshot.target_name}:\n{get_pretty_yaml_config(decision.target_config, top_level_key=snapshot.target_name)}"
+                )
+
 
         container_context = self._prepare_monitored_container_context(container, snapshot, decision)
         container_context.currently_configured = True

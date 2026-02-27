@@ -87,7 +87,6 @@ class ContainerSourceConfig(KeywordBase, ContainerEventBase):
     never_monitor: Optional[ContainerMatchCriteria] = Field(None, description="Containers that should never be monitored, regardless of other rules.")
     defaults: Optional[ModularDefaultsConfig] = Field(None, description="Default settings applied to all container rules.")
     rules: Optional[List[ContainerRule]] = Field(None, description="List of container monitoring rules.")
-    overlays: Optional[List[ContainerRule]] = Field(None, description="Rules that overlay (patch) on top of matched containers without replacing existing rules.")
 
     @model_validator(mode="wrap")
     @classmethod
@@ -145,7 +144,6 @@ class SwarmSourceConfig(KeywordBase, ContainerEventBase):
     never_monitor: Optional[SwarmMatchCriteria] = Field(None, description="Swarm services that should never be monitored, regardless of other rules.")
     defaults: Optional[ModularDefaultsConfig] = Field(None, description="Default settings applied to all Swarm rules.")
     rules: Optional[List[SwarmRule]] = Field(None, description="List of Swarm service monitoring rules.")
-    overlays: Optional[List[SwarmRule]] = Field(None, description="Rules that overlay (patch) on top of matched Swarm services without replacing existing rules.")
 
     @model_validator(mode="wrap")
     @classmethod
