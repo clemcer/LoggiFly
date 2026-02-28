@@ -327,11 +327,11 @@ class DockerLogMonitor:
 
         # Start monitoring
         target_name = snapshot.target_name
-        dmd = is_true_env_var(get_env_var("DEBUG_MONITORING_DECISION", fallback_value="false"))
-        if dmd:
-            self.logger.debug(f"Monitoring {target_name}: {decision.reason}")
+        self.logger.info(f"Starting monitoring for {target_name}: {decision.reason}")
+        dtg = is_true_env_var(get_env_var("DEBUG_TARGET_CONFIG", fallback_value="false"))
+        if dtg:
             self.logger.debug(
-                f"Effective target config for {snapshot.target_name}:\n{get_pretty_yaml_config(decision.target_config, top_level_key=snapshot.target_name)}"
+                f"Effective target config for {target_name}:\n{get_pretty_yaml_config(decision.target_config, top_level_key=target_name)}"
                 )
 
 
@@ -576,7 +576,6 @@ class DockerLogMonitor:
             target_name = container_context.target_name
             processor = container_context.processor
             gen = container_context.generation
-            self.logger.debug(f"Starting monitoring thread for container {target_name} with generation {gen}")
             if driver in ('none', ''):
                 self.logger.warning(f"Container {container.name} has LoggingDriver 'none'. No logs available.")
                 stop_monitoring_event.set()
@@ -592,7 +591,7 @@ class DockerLogMonitor:
                     log_stream = container.logs(stream=True, follow=True, since=now)
                     container_context.log_stream = log_stream
                     monitoring_stopped_event.clear()
-                    self.logger.info(f"Monitoring for Container started: {target_name}")
+                    self.logger.debug(f"Monitoring for Container started: {target_name} (gen: {gen})")
                     for chunk in log_stream:
                         MAX_BUFFER_SIZE = 10 * 1024 * 1024  # 10MB
                         buffer += chunk
@@ -676,7 +675,7 @@ class DockerLogMonitor:
                             except docker.errors.NotFound:
                                 self.logger.debug(f"Docker Event Handler: Container {container_id} not found.")
                             if container and container.id and self._maybe_monitor_container(container):
-                                if self.config.settings.disable_monitor_event_message is False:
+                                if self.config.settings.is_notification_enabled("monitor_event") is True:
                                     target_name = ctx.target_name if (ctx := self._registry.get_by_id(container.id)) else container_name
                                     # TODO: maybe add template fields
                                     send_notification(self.config, title=self.loggifly_notification_title, message=f"Monitoring new container: {target_name}")

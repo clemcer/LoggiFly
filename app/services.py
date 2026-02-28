@@ -169,22 +169,22 @@ def trigger_olivetin_action(
     logger: logging.Logger,
     *,
     send_notification_cb=None,
-    disable_notifications: bool | None = None,
+    disable_trigger_notifications: bool | None = None,
 ):
     """
     Run an OliveTin action in a background thread using merged settings.
 
     Args:
-        trigger_context: trigger context containing olivetin_url/username/password (+ optional disable_notifications).
+        trigger_context: trigger context containing olivetin_url/username/password (+ optional disable_trigger_notifications).
         action_cfg: OliveTin action dict (id, arguments).
         logger: logger instance for diagnostics.
         send_notification_cb: callable(title, message) to emit a notification (optional).
-        disable_notifications: explicit override; defaults to trigger_context.get("disable_notifications").
+        disable_trigger_notifications: explicit override; defaults to trigger_context.get("disable_trigger_notifications").
     """
     url = trigger_context.get("olivetin_url")
     username = trigger_context.get("olivetin_username")
     password = trigger_context.get("olivetin_password")
-    disable = disable_notifications if disable_notifications is not None else trigger_context.get("disable_notifications") or False
+    disable = disable_trigger_notifications if disable_trigger_notifications is not None else trigger_context.get("disable_trigger_notifications") or False
 
     if not url:
         logger.error("Could not start OliveTin action because URL is not set.")

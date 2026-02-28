@@ -7,6 +7,14 @@ import yaml
 from constants import MonitorType, SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_CONTAINER_EVENTS
 from utils import get_env_var
 
+
+class MyDumper(yaml.Dumper):
+
+    def increase_indent(self, flow=False, indentless=False):
+        """indent lists as well"""
+        return super().increase_indent(flow=flow, indentless=False)
+
+
 def strict_config_validation() -> bool:
     val = get_env_var("STRICT_CONFIG")
     if val is None:
@@ -56,7 +64,14 @@ def get_pretty_yaml_config(config, top_level_key=None):
     )
     if top_level_key:
         config_dict = {top_level_key: config_dict}
-    return yaml.dump(config_dict, default_flow_style=False, sort_keys=False, indent=4)
+    return yaml.dump(
+        config_dict, 
+        Dumper=MyDumper, 
+        default_flow_style=False,
+        sort_keys=False, 
+        indent=2,
+        allow_unicode=True
+        )
 
 
 def prettify_config_dict(data, mask_secrets: bool = True):

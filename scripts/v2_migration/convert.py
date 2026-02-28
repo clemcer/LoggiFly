@@ -54,7 +54,19 @@ DEPRECATED_FIELDS = [
     "monitor_all_swarm_services",
     "excluded_containers",
     "excluded_swarm_services",
+    "disable_start_message",
+    "disable_shutdown_message",
+    "disable_config_reload_message",
+    "disable_monitor_event_message",
 ]
+
+# Maps old disable_* settings fields to their SystemNotifications keys
+_SYSTEM_NOTIFICATION_RENAMES = {
+    "disable_start_message": "start",
+    "disable_shutdown_message": "shutdown",
+    "disable_config_reload_message": "config_reload",
+    "disable_monitor_event_message": "monitor_event",
+}
 
 def _migrate_field_names(config_copy: dict, old: str, new: str, exclude_values: list[str] = [], exclude_keys: list[str] = []) -> dict:
     keys_to_migrate = []
@@ -86,6 +98,24 @@ def _extract_defaults(settings: dict) -> dict:
             _log_message(f"Moved '{key}' from settings to defaults")
     return defaults
 
+def _migrate_system_notifications(settings: dict) -> dict | None:
+    """Convert disable_* boolean settings to the new system_notifications structure.
+
+    Returns the system_notifications value to use, or None if no migration is needed
+    (i.e. all notifications remain at their default enabled state).
+    """
+    notifications: dict[str, bool] = {}
+    for old_key, new_key in _SYSTEM_NOTIFICATION_RENAMES.items():
+        if settings.get(old_key) is True:
+            notifications[new_key] = False
+            _log_message(f"Migrated '{old_key}: true' to 'system_notifications.{new_key}: false'")
+
+    if not notifications:
+        return None
+
+    return notifications
+
+
 def _clean_settings(settings: dict) -> dict:
     """Remove migrated fields, keep only app settings."""
     clean = {}
@@ -94,6 +124,11 @@ def _clean_settings(settings: dict) -> dict:
         if key in settings:
             clean[key] = settings[key]
             _log_message(f"Keeping '{key}' in settings")
+
+    # Migrate disable_* fields to system_notifications
+    system_notifications = _migrate_system_notifications(settings)
+    if system_notifications is not None:
+        clean["system_notifications"] = system_notifications
 
     # Warn about any unexpected remaining fields
     for key in settings:
@@ -415,7 +450,6 @@ IMPORTANT: If you see warnings during validation they refer to invalid fields in
         configv1_8, _ = load_config(path)
     except Exception as e:
         _log_message(f"Error loading/validating v1 config: {e}")
-        # trace
         import traceback
         traceback.print_exc()
         sys.exit(1)
@@ -505,7 +539,14 @@ If you see any warnings during validation make sure that no important settings a
         _log_message(f"Error prettifying config: {e}")
         sys.exit(1)
 
-    yaml_str = yaml.dump(output, Dumper=MyDumper, sort_keys=False, indent=2)
+    yaml_str = yaml.dump(
+        output, 
+        Dumper=MyDumper, 
+        sort_keys=False, 
+        indent=2, 
+        allow_unicode=True,
+        width=300
+    )
     with open(output_path, "w") as f:
         f.write(yaml_str)
     return output

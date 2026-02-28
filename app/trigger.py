@@ -72,8 +72,8 @@ def _process_trigger(
                 logger.error(f"Could not create log attachment file for {monitored_target.target_name}")
 
         # Send notification if not disabled
-        disable_notifications = trigger_context.get("disable_notifications", False)
-        if disable_notifications:
+        disable_trigger_notifications = trigger_context.get("disable_trigger_notifications", False)
+        if disable_trigger_notifications:
             logger.debug(f"Not sending notification for {monitored_target.target_name} because notifications are disabled.")
         else:
             title = render_title(notification_context, template=trigger_context.get("title_template"))
@@ -95,8 +95,8 @@ def _process_trigger(
                 trigger_context=trigger_context,
                 action_cfg=olivetin_config,
                 logger=logger,
-                disable_notifications=disable_notifications,
-                send_notification_cb=None if disable_notifications else lambda title, message: send_notification(
+                disable_trigger_notifications=disable_trigger_notifications,
+                send_notification_cb=None if disable_trigger_notifications else lambda title, message: send_notification(
                     config,
                     title=title,
                     message=message,

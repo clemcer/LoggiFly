@@ -57,16 +57,28 @@ class BaseConfigModel(BaseModel):
 # Settings Config Classes
 # ================================================
 
+class SystemNotifications(BaseConfigModel):
+    start: bool = Field(True, description="Enable the notification sent when LoggiFly starts.")
+    shutdown: bool = Field(True, description="Enable the notification sent when LoggiFly shuts down.")
+    config_reload: bool = Field(True, description="Enable the notification sent when the config file is reloaded.")
+    monitor_event: bool = Field(True, description="Enable the notification sent when a container starts or stops being monitored.")
+
+
 class SettingsConfig(BaseConfigModel):
     """Application-wide settings that control LoggiFly's behaviour."""
     log_level: str = Field("INFO", description="Log verbosity level. One of `DEBUG`, `INFO`, `WARNING`, `ERROR`.")
-    multi_line_entries: bool = Field(True, description="Group multi-line log entries before keyword matching. LoggiFly automatically detects the log format.")
-    disable_start_message: bool = Field(False, description="Suppress the notification sent when LoggiFly starts.")
-    disable_shutdown_message: bool = Field(False, description="Suppress the notification sent when LoggiFly shuts down.")
-    disable_config_reload_message: bool = Field(False, description="Suppress the notification sent when the config file is reloaded.")
-    disable_monitor_event_message: bool = Field(False, description="Suppress the notification sent when a container starts or stops being monitored.")
-    compact_summary_message: bool = Field(False, description="Send a shorter summary notification instead of a full message.")
+    multi_line_entries: bool = Field(True, description="Catch log entries that span multiple lines instead of going line by line.")
+    compact_summary_message: bool = Field(False, description="Get a comma-separated list of monitored targets instead of a multi-line list in startup and config reload notifications.")
     reload_config: bool = Field(True, description="Automatically reload configuration when the config file changes.")
+    system_notifications: SystemNotifications | bool = Field(SystemNotifications(), description="System notifications settings. Can be set to a boolean to enable or disable all notifications or to a SystemNotifications object to enable or disable specific notifications.") # type: ignore[call-arg]
+
+    def is_notification_enabled(self, type_string: str) -> bool:
+        if isinstance(self.system_notifications, bool):
+            return self.system_notifications
+        if isinstance(self.system_notifications, SystemNotifications):
+            return getattr(self.system_notifications, type_string)
+        return False
+
 
 # ================================================
 # Misc Config Models (shared between models)
@@ -181,7 +193,7 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     attachment_lines: Optional[int] = Field(None, description="Number of log lines to include in the log attachment.")
     hide_full_regex: Optional[bool] = Field(None, description="In notifications, hide the full regex match and only show named capturing groups.")
     regex_case_sensitive: Optional[bool] = Field(None, description="Whether regex patterns are case-sensitive.")
-    disable_notifications: Optional[bool] = Field(None, description="Suppress all notifications. Useful when only container actions or OliveTin actions are needed.")
+    disable_trigger_notifications: Optional[bool] = Field(None, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: Optional[bool] = Field(None, description="Combine multiple keyword matches from the same log entry into a single notification.")
 
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
@@ -192,7 +204,7 @@ class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     attachment_lines: int = Field(20, description="Number of log lines to include in the log attachment.")
     hide_full_regex: bool = Field(False, description="In notifications, hide the full regex match and only show named capturing groups.")
     regex_case_sensitive: bool = Field(True, description="Whether regex patterns are case-sensitive.")
-    disable_notifications: bool = Field(False, description="Suppress all notifications. Useful when only container actions or OliveTin actions are needed.")
+    disable_trigger_notifications: bool = Field(False, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: bool = Field(False, description="Combine multiple keyword matches from the same log entry into a single notification.")
 
 

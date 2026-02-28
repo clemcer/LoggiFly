@@ -73,7 +73,7 @@ def create_handle_signal(docker_hosts: List[DockerClientInfo], config, config_ob
     monitor_instances = [host_info.monitor for host_info in docker_hosts if host_info.monitor]
 
     def handle_signal(signum, frame):
-        if not config.settings.disable_shutdown_message:
+        if config.settings.is_notification_enabled("shutdown") is True:
             send_notification(config=config,
                             title=get_title_prefix(docker_hosts) + "LoggiFly", 
                             message="Shutting down")
@@ -157,7 +157,7 @@ class ConfigHandler(FileSystemEventHandler):
         message = format_message(messages, "LoggiFly is not monitoring anything.")
 
         logging.info(f"Config reloaded successfully.\n{message}")
-        if self.config.settings.disable_config_reload_message is False:
+        if self.config.settings.is_notification_enabled("config_reload") is True:
             send_notification(
                 config=self.config,
                 title="LoggiFly: The config file was reloaded",
@@ -439,7 +439,7 @@ def start_loggifly():
     message = format_message(start_messages, "LoggiFly started without monitoring anything.")
 
     logging.info(f"LoggiFly started.\n{message}")
-    if config.settings.disable_start_message is False:
+    if config.settings.is_notification_enabled("start") is True:
         send_notification(
             config=config,
             title=get_title_prefix(docker_hosts) + "LoggiFly started",
