@@ -8,6 +8,7 @@ COPY requirements.txt .
 LABEL org.opencontainers.image.source="https://github.com/clemcer/loggifly"
 
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir ruamel.yaml
 
 COPY app/ .
 COPY scripts/v2_migration/*.py .

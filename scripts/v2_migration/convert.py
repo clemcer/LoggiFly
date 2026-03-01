@@ -6,38 +6,32 @@ import argparse
 import re
 import yaml
 import sys
+from io import StringIO
 from typing import Any, cast
 import copy
 import os
 from pydantic import ValidationError, SecretStr
+from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import LiteralScalarString
 from load_configv1 import load_config
 from config.models.base import RootDefaultsConfig, SettingsConfig # type: ignore
 from config.models.root import GlobalConfig # type: ignore
 from config.helpers import prettify_config_dict # type: ignore
 
-class MyDumper(yaml.Dumper):
 
-    # don't use yaml anchors
-    # def ignore_aliases(self, data):
-    #       return True
-
-    def increase_indent(self, flow=False, indentless=False):
-        return super().increase_indent(flow=flow, indentless=False)
-
-    def write_line_break(self, data=None):
-        super().write_line_break(data)
-        # add an extra line break after top level keys
-        if len(self.indents) == 1:
-            super().write_line_break()
-
-    def represent_str(self, data):
-        """Use | style for strings that contain newlines or tabs."""
+def _prepare_for_ruamel(data: Any) -> Any:
+    """Recursively convert multiline strings to LiteralScalarString for | block style.
+    Also unescapes literal \\n sequences to real newlines."""
+    if isinstance(data, dict):
+        return {k: _prepare_for_ruamel(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_prepare_for_ruamel(item) for item in data]
+    elif isinstance(data, str):
         unescaped = data.replace('\\n', '\n').replace('\\t', '\t')
         if '\n' in unescaped:
-            return self.represent_scalar('tag:yaml.org,2002:str', unescaped, style='|')
-        return self.represent_scalar('tag:yaml.org,2002:str', data)
-
-MyDumper.add_representer(str, MyDumper.represent_str)
+            return LiteralScalarString(unescaped)
+        return data
+    return data
 
 
 FIELD_RENAMES = {
@@ -456,7 +450,7 @@ IMPORTANT: If you see warnings during validation they refer to invalid fields in
 
     _log_phase("Phase 0.5: Preparing to convert v1 config to v2 config... Migrating field names...")
     # Migrate field names
-    configv1_8_dict = configv1_8.model_dump(exclude_none=True)
+    configv1_8_dict = configv1_8.model_dump(exclude_none=True, exclude_unset=True)
     renamed_fields_config = copy.deepcopy(configv1_8_dict)
     for key, value in FIELD_RENAMES.items():
         if key == "action" and value == "container_action":
@@ -539,14 +533,20 @@ If you see any warnings during validation make sure that no important settings a
         _log_message(f"Error prettifying config: {e}")
         sys.exit(1)
 
-    yaml_str = yaml.dump(
-        output, 
-        Dumper=MyDumper, 
-        sort_keys=False, 
-        indent=2, 
-        allow_unicode=True,
-        width=300
-    )
+    output = _prepare_for_ruamel(output)
+
+    ryaml = YAML()
+    ryaml.default_flow_style = False
+    ryaml.allow_unicode = True
+    ryaml.width = 4096
+    ryaml.indent(mapping=2, sequence=4, offset=2)
+
+    stream = StringIO()
+    ryaml.dump(output, stream)
+    yaml_str = stream.getvalue()
+
+    yaml_str = re.sub(r'\n([a-zA-Z_])', r'\n\n\1', yaml_str)
+
     with open(output_path, "w") as f:
         f.write(yaml_str)
     return output
