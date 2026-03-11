@@ -3,7 +3,7 @@ import logging
 import yaml
 from typing import Any
 from constants import NotificationPrefix
-from config.models.root import GlobalConfig
+from config.models.root import RootConfig
 from config.models.base import SettingsConfig, RootDefaultsConfig, NotificationDefaults
 from config.helpers import stringify_numbers, get_pretty_yaml_config
 from utils import get_env_var
@@ -57,11 +57,21 @@ def override_with_env(cnf: dict) -> dict:
     defaults_keys = [
         k.upper() for k in RootDefaultsConfig.model_fields.keys() if k.upper() not in skip_keys + notification_defaults_keys
         ] # Notification settings are set under notifications not defaults
+    global_keywords = get_list_or_none(get_env_var("GLOBAL_KEYWORDS"))
 
     cnf.setdefault("settings", {})
     cnf["settings"].update(get_env_config(setting_keys, skip_keys, list_keys))
-    cnf.setdefault("defaults", {})
-    cnf["defaults"].update(get_env_config(defaults_keys, skip_keys + notification_defaults_keys, list_keys))
+
+    cnf.setdefault("global", {})
+    cnf["global"].setdefault("defaults", {})
+    cnf["global"]["defaults"].update(get_env_config(
+        keys=defaults_keys, 
+        skip_keys=skip_keys + notification_defaults_keys, 
+        list_keys=list_keys
+        ))
+    if global_keywords:
+        cnf["global"].setdefault("keywords", [])
+        cnf["global"]["keywords"].extend(global_keywords)
 
     for key in notification_defaults_keys:
         # under defaults they have a prefix, under notifications they don't
@@ -115,7 +125,7 @@ def override_with_env(cnf: dict) -> dict:
     for idx, kv in enumerate([("service_names", swarm_services_list), ("stack_names", swarm_stacks_list)]):
         key, value = kv
         if value:
-            cnf.setdefault("swarm", {}).setdefault("rules", [])
+            cnf.setdefault("swarm", {}).setdefault("rulesm", [])
             cnf["swarm"]["rules"].insert(idx, {
                 "id": f"environment-rule-{idx+1}",
                 "match": {"include": {key: value}},
@@ -155,7 +165,7 @@ def load_config(path: str = CONFIG_PATH):
     yaml_config = stringify_numbers(yaml_config)
     
     yaml_config = override_with_env(cnf=yaml_config)
-    config = GlobalConfig.model_validate(yaml_config)
+    config = RootConfig.model_validate(yaml_config)
 
     yaml_output = get_pretty_yaml_config(config)
     logging.info(f"\n ------------- CONFIG ------------- \n{yaml_output}\n ----------------------------------")

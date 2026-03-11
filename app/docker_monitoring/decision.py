@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from constants import MonitorType
 from config.helpers import format_pydantic_error, get_pretty_yaml_config
-from config.models import GlobalConfig
+from config.models import RootConfig
 from config.models import (
     ContainerSourceConfig,
     SwarmSourceConfig,
@@ -119,7 +119,7 @@ def create_target_config(
     validated_label_config: dict | None,
     target_dict: dict,
     source_config: ContainerSourceConfig | SwarmSourceConfig | None,
-    global_config: GlobalConfig,
+    global_config: RootConfig,
 ) -> EffectiveTargetConfig:
     """Build the effective target config by merging: global defaults < source defaults < rules < labels."""
     global_config_dict = global_config.model_dump(exclude_none=True)
@@ -176,7 +176,7 @@ class MonitorDecision:
     def evaluate(
         cls,
         snapshot: ContainerSnapshot,
-        global_config: GlobalConfig,
+        global_config: RootConfig,
         hostname: str,
     ) -> 'MonitorDecision':
         """
@@ -198,7 +198,7 @@ class MonitorDecision:
     def evaluate_for_reload(
         cls,
         ctx: 'MonitoredContainerContext',
-        new_config: GlobalConfig,
+        new_config: RootConfig,
         hostname: str,
     ) -> 'MonitorDecision':
         """
@@ -227,7 +227,7 @@ class MonitorDecision:
     def _evaluate_container(
         cls,
         snapshot: ContainerSnapshot,
-        global_config: GlobalConfig,
+        global_config: RootConfig,
         hostname: str,
     ) -> 'MonitorDecision':
         return cls._evaluate_target(
@@ -245,7 +245,7 @@ class MonitorDecision:
     def _evaluate_swarm(
         cls,
         snapshot: ContainerSnapshot,
-        global_config: GlobalConfig,
+        global_config: RootConfig,
         hostname: str,
     ) -> 'MonitorDecision':
         service_name = snapshot.service_name
@@ -282,7 +282,7 @@ class MonitorDecision:
     def _evaluate_target(
         cls,
         snapshot: ContainerSnapshot,
-        global_config: GlobalConfig,
+        global_config: RootConfig,
         hostname: str,
         target_name: str,
         source_config: ContainerSourceConfig | SwarmSourceConfig | None,

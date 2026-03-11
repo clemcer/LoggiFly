@@ -10,7 +10,7 @@ from constants import EMOJI_PATTERN, NotificationPrefix
 from notification_formatter import NotificationContext
 from utils import merge_with_precedence, LogAttachment
 
-from config.models import GlobalConfig
+from config.models import RootConfig
 from config.models import NtfyConfig, AppriseConfig, WebhookConfig
 
 
@@ -273,7 +273,7 @@ def send_webhook(json_data: dict, webhook_config: dict):
         logger.error(f"Error trying to send webhook to url: {url}, headers: {headers}: %s", e)
 
 def send_notification(
-    config: GlobalConfig, 
+    config: RootConfig, 
     title: str, 
     message: str,
     trigger_context: dict | None = None,

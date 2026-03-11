@@ -60,6 +60,7 @@ def get_pretty_yaml_config(config, top_level_key=None):
             exclude_none=True, 
             exclude_defaults=False, 
             exclude_unset=False,
+            by_alias=True,
         )
     )
     if top_level_key:

@@ -32,7 +32,7 @@ from monitoring import (
     MonitoredContainerTarget,
     EffectiveTargetConfig, 
 )
-from config.models import GlobalConfig, ContainerEventConfig
+from config.models import RootConfig, ContainerEventConfig
 from config.helpers import get_pretty_yaml_config
 from docker_monitoring.decision import MonitorDecision
 class MonitoredContainerContext:
@@ -197,7 +197,7 @@ class DockerLogMonitor:
     """
     
     def __init__(
-        self, config: GlobalConfig, 
+        self, config: RootConfig, 
         client: docker.DockerClient,
         hostname: str,
         host_url: str,
@@ -327,9 +327,10 @@ class DockerLogMonitor:
 
         # Start monitoring
         target_name = snapshot.target_name
-        self.logger.info(f"Starting monitoring for {target_name}: {decision.reason}")
-        dtg = is_true_env_var(get_env_var("DEBUG_TARGET_CONFIG", fallback_value="false"))
-        if dtg:
+        self.logger.info(f"Starting monitoring for {target_name}, {decision.reason}")
+        # dtg = is_true_env_var(get_env_var("DEBUG_TARGET_CONFIG", fallback_value="false"))
+        # if dtg:
+        if self.config.settings.log_target_configs:
             self.logger.debug(
                 f"Effective target config for {target_name}:\n{get_pretty_yaml_config(decision.target_config, top_level_key=target_name)}"
                 )
@@ -424,7 +425,7 @@ class DockerLogMonitor:
         self._watch_events()
         return self._start_message()
 
-    def reload_config(self, config: GlobalConfig | None) -> str:
+    def reload_config(self, config: RootConfig | None) -> str:
         """
         Reload configuration and update monitoring for containers.
         Called by ConfigHandler when config.yaml changes or on reconnection.
@@ -591,7 +592,7 @@ class DockerLogMonitor:
                     log_stream = container.logs(stream=True, follow=True, since=now)
                     container_context.log_stream = log_stream
                     monitoring_stopped_event.clear()
-                    self.logger.debug(f"Monitoring for Container started: {target_name} (gen: {gen})")
+                    self.logger.debug(f"Monitoring started for container '{target_name}' (gen: {gen})")
                     for chunk in log_stream:
                         MAX_BUFFER_SIZE = 10 * 1024 * 1024  # 10MB
                         buffer += chunk

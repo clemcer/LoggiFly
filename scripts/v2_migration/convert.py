@@ -15,7 +15,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
 from load_configv1 import load_config
 from config.models.base import RootDefaultsConfig, SettingsConfig # type: ignore
-from config.models.root import GlobalConfig # type: ignore
+from config.models.root import RootConfig # type: ignore
 from config.helpers import prettify_config_dict # type: ignore
 
 
@@ -198,7 +198,6 @@ def _convert_swarm(
 
     old_swarm = old_config.get("swarm_services", {})
     old_settings = old_config.get("settings", {})
-    global_keywords = old_config.get("global_keywords", {})
 
     monitor_all_swarm = old_settings.get("monitor_all_swarm_services", None)
     excluded_swarm = old_settings.get("excluded_swarm_services", None)
@@ -219,10 +218,6 @@ def _convert_swarm(
         )
         _log_message("Converted monitor_all_swarm_services to wildcard rule")
 
-    # Convert global_keywords to source-level keywords
-    if global_keywords and global_keywords.get("keywords"):
-        output["keywords"] = global_keywords["keywords"]
-        _log_message("Moved global_keywords.keywords to swarm.keywords")
 
     # Convert each container config to a rule
     if old_swarm:
@@ -268,7 +263,6 @@ def _convert_containers(
 
     old_containers = old_config.get("containers", {})
     old_settings = old_config.get("settings", {})
-    global_keywords = old_config.get("global_keywords", {})
 
     monitor_all_containers = old_settings.get("monitor_all_containers", None)
     excluded_containers = old_settings.get("excluded_containers", None)
@@ -294,10 +288,6 @@ def _convert_containers(
         )
         _log_message("Converted monitor_all_containers to wildcard rule")
 
-    # Convert global_keywords to source-level keywords
-    if global_keywords and global_keywords.get("keywords"):
-        output["keywords"] = global_keywords["keywords"]
-        _log_message("Moved global_keywords.keywords to containers.keywords")
 
     # Convert each container config to a rule
     if old_containers:
@@ -465,11 +455,18 @@ IMPORTANT: If you see warnings during validation they refer to invalid fields in
     v1_settings = renamed_fields_config.get("settings", {})
     output: dict[str, Any] = {}
 
-    # Defaults Section
-    _log_phase("Phase 1: Extracting defaults from settings...")
+    # Global Section (defaults + global_keywords)
+    _log_phase("Phase 1: Extracting defaults and global keywords into global section...")
+    global_section: dict[str, Any] = {}
     defaults = _extract_defaults(v1_settings)
     if defaults:
-        output["defaults"] = defaults
+        global_section["defaults"] = defaults
+    global_keywords = renamed_fields_config.get("global_keywords", {})
+    if global_keywords and global_keywords.get("keywords"):
+        global_section["keywords"] = global_keywords["keywords"]
+        _log_message("Moved global_keywords.keywords to global.keywords")
+    if global_section:
+        output["global"] = global_section
 
     # Settings Section
     _log_phase("Phase 2: Creating settings section...")
@@ -509,7 +506,7 @@ If you see any warnings during validation make sure that no important settings a
 
     os.environ["STRICT_CONFIG"] = "false"
     try:
-        GlobalConfig.model_validate(copy.deepcopy(output)).model_dump(exclude_none=True)
+        RootConfig.model_validate(copy.deepcopy(output)).model_dump(exclude_none=True)
     except ValidationError as e:
         _log_message(f"Error validating config: {e}")
         _log_message(f"Error details: {e.errors()}")
@@ -519,9 +516,9 @@ If you see any warnings during validation make sure that no important settings a
     output = cast(dict[str, Any], _convert_secretstr(output))
 
     preferred_order = [
+        "global",
         "containers",
         "swarm",
-        "defaults",
         "notifications",
         "settings",
     ]

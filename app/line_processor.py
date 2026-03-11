@@ -12,7 +12,7 @@ from constants import (
 from notification_formatter import NotificationContext
 from utils import merge_trigger_context, merge_with_precedence, TriggerTracker
 from trigger import process_trigger
-from config.models import GlobalConfig
+from config.models import RootConfig
 from monitoring import MonitoredTarget, EffectiveTargetConfig
 
 
@@ -32,7 +32,7 @@ class LogProcessor:
 
     def __init__(self,
                  logger,
-                 config: GlobalConfig,
+                 config: RootConfig,
                  monitored_target: "MonitoredTarget",
                  ):
         """
@@ -83,7 +83,7 @@ class LogProcessor:
                 else:
                     self.logger.debug(f"{self.target_name}: Mode: Single-Line. Could not find starting pattern in the logs. Continuing the search in the next {self.line_limit - self.line_count} lines")
 
-    def load_config_variables(self, config: GlobalConfig, target_config: "EffectiveTargetConfig"):
+    def load_config_variables(self, config: RootConfig, target_config: "EffectiveTargetConfig"):
         """
         Load and merge configuration for global and container-specific keywords and settings.
         Called on initialization and when reloading config.

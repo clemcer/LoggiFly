@@ -1,4 +1,4 @@
-from config.models.root import GlobalConfig             
+from config.models.root import RootConfig             
 from config.models.base import (                          
     RootDefaultsConfig,                                       
     SettingsConfig,                                       

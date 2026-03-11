@@ -38,6 +38,7 @@ class BaseConfigModel(BaseModel):
         use_enum_values=True,
         from_attributes=False,
         arbitrary_types_allowed=False,
+        populate_by_name=True,
     )
 
     @model_validator(mode="before")
@@ -71,6 +72,7 @@ class SettingsConfig(BaseConfigModel):
     compact_summary_message: bool = Field(False, description="Get a comma-separated list of monitored targets instead of a multi-line list in startup and config reload notifications.")
     reload_config: bool = Field(True, description="Automatically reload configuration when the config file changes.")
     system_notifications: SystemNotifications | bool = Field(SystemNotifications(), description="System notifications settings. Can be set to a boolean to enable or disable all notifications or to a SystemNotifications object to enable or disable specific notifications.") # type: ignore[call-arg]
+    log_target_configs: bool = Field(False, description="Log the effective configuration for each target to the console.")
 
     def is_notification_enabled(self, type_string: str) -> bool:
         if isinstance(self.system_notifications, bool):
@@ -366,3 +368,8 @@ class KeywordBase(BaseConfigModel):
         if isinstance(data, dict) and "keywords" in data and isinstance(data["keywords"], list):
             data["keywords"] = validate_keywords(data["keywords"])
         return data
+
+
+class GlobalConfig(KeywordBase):
+    """Global configuration for defaults and keywords."""
+    defaults: RootDefaultsConfig = Field(RootDefaultsConfig(), description="Global default settings applied to all rules unless overridden.")  # type: ignore[call-arg]

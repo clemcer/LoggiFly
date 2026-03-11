@@ -7,7 +7,7 @@ from notifier import send_notification
 from services import trigger_olivetin_action
 from utils import LogAttachment, get_env_var, convert_to_int
 
-from config.models import GlobalConfig
+from config.models import RootConfig
 
 if TYPE_CHECKING:
     from monitoring.base import MonitoredTarget
@@ -25,7 +25,7 @@ def shutdown_trigger_executor():
 
 def process_trigger(
     logger: logging.Logger,
-    config: GlobalConfig,
+    config: RootConfig,
     trigger_context: dict,
     monitored_target: "MonitoredTarget",
     notification_context: NotificationContext,
@@ -34,7 +34,7 @@ def process_trigger(
 
 def _process_trigger(
     logger: logging.Logger,
-    config: GlobalConfig,
+    config: RootConfig,
     trigger_context: dict,
     monitored_target: "MonitoredTarget",
     notification_context: NotificationContext,

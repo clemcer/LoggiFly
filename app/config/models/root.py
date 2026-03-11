@@ -10,17 +10,18 @@ from config.models.base import (
     RootDefaultsConfig,
     NotificationsConfig,
     SettingsConfig,
+    GlobalConfig,
 )
 from config.models.docker import ContainerSourceConfig, SwarmSourceConfig
 
 
-class GlobalConfig(BaseConfigModel):
+class RootConfig(BaseConfigModel):
     """Root configuration model for LoggiFly."""
     version: Literal[2] = Field(2, description="Config schema version. Must be `2`.")
     containers: Optional[ContainerSourceConfig] = Field(None, description="Configuration for Docker container monitoring.")
     swarm: Optional[SwarmSourceConfig] = Field(None, description="Configuration for Docker Swarm service monitoring.")
     notifications: NotificationsConfig = Field(NotificationsConfig(), description="Notification service configuration (ntfy, apprise, webhook).")  # type: ignore[call-arg]
-    defaults: RootDefaultsConfig = Field(RootDefaultsConfig(), description="Global default settings applied to all rules unless overridden.")  # type: ignore[call-arg]
+    global_config: GlobalConfig = Field(GlobalConfig(), alias="global", description="Global configuration for defaults and keywords.")   # type: ignore[call-arg]
     settings: SettingsConfig = Field(SettingsConfig(), description="Application-wide settings.")  # type: ignore[call-arg]
 
     @field_validator("version", mode="before")
