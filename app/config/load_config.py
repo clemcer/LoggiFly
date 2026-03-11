@@ -4,9 +4,9 @@ import yaml
 from typing import Any
 from constants import NotificationPrefix
 from config.models.root import RootConfig
-from config.models.base import SettingsConfig, RootDefaultsConfig, NotificationDefaults
+from config.models.base import SettingsConfig, RootDefaultsConfig, NotificationDefaults, SystemNotifications
 from config.helpers import stringify_numbers, get_pretty_yaml_config
-from utils import get_env_var
+from utils import get_env_var, is_true_env_var
 
 CONFIG_PATH = get_env_var("CONFIG_PATH", fallback_value="/config/config.yaml") or "/config/config.yaml"
 
@@ -45,7 +45,7 @@ def override_with_env(cnf: dict) -> dict:
         current[path[-1]] = value
 
 
-    skip_keys = ["NTFY_ACTIONS", "NTFY_HEADERS", "WEBHOOK_HEADERS"]
+    skip_keys = ["NTFY_ACTIONS", "NTFY_HEADERS", "WEBHOOK_HEADERS", "SYSTEM_NOTIFICATIONS"]
     list_keys = ["IGNORE_KEYWORDS"]
 
     notification_defaults_keys = [
@@ -57,11 +57,29 @@ def override_with_env(cnf: dict) -> dict:
     defaults_keys = [
         k.upper() for k in RootDefaultsConfig.model_fields.keys() if k.upper() not in skip_keys + notification_defaults_keys
         ] # Notification settings are set under notifications not defaults
-    global_keywords = get_list_or_none(get_env_var("GLOBAL_KEYWORDS"))
 
+    global_keywords = get_list_or_none(get_env_var("GLOBAL_KEYWORDS"))
+    
+    system_notification_keys = {}
+    for key in (SystemNotifications.model_fields.keys()):
+        env_value = get_env_var(f"SYSTEM_NOTIFICATIONS_{key.upper()}")
+        if env_value:
+            system_notification_keys[key] = is_true_env_var(env_value)
+    
+    system_notifications = get_env_var("SYSTEM_NOTIFICATIONS")
+
+    # SETTINGS BLOCK ------------------------------------------------------------
     cnf.setdefault("settings", {})
+
+    if system_notifications is not None:
+        cnf["settings"]["system_notifications"] = is_true_env_var(system_notifications)
+    elif system_notification_keys:
+        cnf["settings"].setdefault("system_notifications", {})
+        cnf["settings"]["system_notifications"].update(system_notification_keys)
+
     cnf["settings"].update(get_env_config(setting_keys, skip_keys, list_keys))
 
+    # GLOBAL BLOCK ----------------------------------------------------------------
     cnf.setdefault("global", {})
     cnf["global"].setdefault("defaults", {})
     cnf["global"]["defaults"].update(get_env_config(
@@ -73,6 +91,7 @@ def override_with_env(cnf: dict) -> dict:
         cnf["global"].setdefault("keywords", [])
         cnf["global"]["keywords"].extend(global_keywords)
 
+    # NOTIFICATIONS BLOCK ------------------------------------------------------------
     for key in notification_defaults_keys:
         # under defaults they have a prefix, under notifications they don't
         env = get_env_var(key)
@@ -87,7 +106,7 @@ def override_with_env(cnf: dict) -> dict:
             cnf["notifications"].setdefault(notification_type, {})
             cnf["notifications"][notification_type][setting_key] = env
 
-    # CONTAINERS 
+    # CONTAINERS BLOCK ------------------------------------------------------------
     containers_keywords = get_list_or_none(get_env_var("CONTAINERS_KEYWORDS"))
     containers_container_events = get_list_or_none(get_env_var("CONTAINERS_CONTAINER_EVENTS"))
     containers_scope_hosts = get_list_or_none(get_env_var("CONTAINERS_SCOPE_HOSTS"))
@@ -107,7 +126,7 @@ def override_with_env(cnf: dict) -> dict:
             }
         )
 
-    # SWARM SERVICES
+    # SWARM SERVICES BLOCK ------------------------------------------------------------
     swarm_keywords = get_list_or_none(get_env_var("SWARM_KEYWORDS"))
     swarm_container_events = get_list_or_none(get_env_var("SWARM_CONTAINER_EVENTS"))
     swarm_scope_hosts = get_list_or_none(get_env_var("SWARM_SCOPE_HOSTS"))
