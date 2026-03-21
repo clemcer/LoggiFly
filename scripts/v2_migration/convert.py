@@ -41,6 +41,7 @@ FIELD_RENAMES = {
     "notification_cooldown": "trigger_cooldown",
     "keyword_group": "all_of",
     "action_cooldown": "container_action_cooldown",
+    "disable_notifications": "disable_trigger_notifications",
 }
 
 DEPRECATED_FIELDS = [
