@@ -328,9 +328,8 @@ class DockerLogMonitor:
         # Start monitoring
         target_name = snapshot.target_name
         self.logger.info(f"Starting monitoring for {target_name}, {decision.reason}")
-        # dtg = is_true_env_var(get_env_var("DEBUG_TARGET_CONFIG", fallback_value="false"))
-        # if dtg:
-        if self.config.settings.log_target_configs:
+        dtg = is_true_env_var(get_env_var("DEBUG_TARGET_CONFIG", fallback_value="false"))
+        if dtg:
             self.logger.debug(
                 f"Effective target config for {target_name}:\n{get_pretty_yaml_config(decision.target_config, top_level_key=target_name)}"
                 )
