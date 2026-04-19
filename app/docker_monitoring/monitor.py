@@ -719,7 +719,8 @@ class DockerLogMonitor:
         event_type = parse_event_type(event)
         if not event_type:
             return
-        ce = next((ce for ce in configured_events if ce.event == event_type), None)
+        # get the last configured event for this event type, meaning the most specifig one with rules taking precedence over source level
+        ce = next((ce for ce in reversed(configured_events) if ce.event == event_type), None) 
         if not ce:
             return
         self.logger.debug(f"Event {event_type} for container {ctx.target_name} is configured. Processing event.")
