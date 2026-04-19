@@ -52,11 +52,11 @@ def _process_trigger(
                 action_cooldown if isinstance(action_cooldown, int) else 300,
             )
             if action_result:
-                notification_context.action_string = action_to_perform
-                notification_context.action_type = action_result.action_type
-                notification_context.action_target = action_result.action_target
-                notification_context.action_result = action_result.message
-                notification_context.action_succeeded = action_result.success
+                notification_context.container_action_string = action_to_perform
+                notification_context.container_action_type = action_result.action_type
+                notification_context.container_action_target = action_result.action_target
+                notification_context.container_action_result_message = action_result.message
+                notification_context.container_action_succeeded = action_result.success
 
         # Create log file attachment if requested
         attachment: LogAttachment | None = None

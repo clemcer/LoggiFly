@@ -107,11 +107,11 @@ class NotificationContext:
     signal: Optional[str] = None
 
     # action fields
-    action_type: Optional[str] = None
-    action_string: Optional[str] = None
-    action_target: Optional[str] = None
-    action_result: Optional[str] = None
-    action_succeeded: Optional[bool] = None
+    container_action_type: Optional[str] = None
+    container_action_string: Optional[str] = None
+    container_action_target: Optional[str] = None
+    container_action_result_message: Optional[str] = None
+    container_action_succeeded: Optional[bool] = None
 
     extra_fields: Dict[str, Any] = field(default_factory=dict)
     time: Optional[int | float] = None
@@ -183,11 +183,11 @@ class NotificationContext:
             "exit_code": self.exit_code,
             "signal": self.signal,
 
-            "action_type": self.action_type,
-            "action_string": self.action_string,
-            "action_target": self.action_target,
-            "action_result_message": self.action_result,
-            "action_succeeded": self.action_succeeded,
+            "container_action_type": self.container_action_type,
+            "container_action_string": self.container_action_string,
+            "container_action_target": self.container_action_target,
+            "container_action_result_message": self.container_action_result_message,
+            "container_action_succeeded": self.container_action_succeeded,
         }
 
         return defaults
@@ -244,8 +244,8 @@ def render_title(
         # Prepend host identifier to title (only exists for multi-host or swarm setups)
         if ctx.host_identifier:
             title = f"[{ctx.host_identifier}] - {title}"
-        if ctx.action_result is not None:
-            title = f"{title} ({ctx.action_result})"
+        if ctx.container_action_result_message is not None:
+            title = f"{title} ({ctx.container_action_result_message})"
 
     # Safe fallback
     if not title:
