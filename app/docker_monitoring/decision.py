@@ -122,16 +122,16 @@ def create_target_config(
     global_config: RootConfig,
 ) -> EffectiveTargetConfig:
     """Build the effective target config by merging: global defaults < source defaults < rules < labels."""
-    global_config_dict = global_config.model_dump(exclude_none=True)
+    global_block_dict = global_config.global_config.model_dump(exclude_none=True)
     source_config_dict = source_config.model_dump(exclude_none=True) if source_config else {}
 
-    keywords = source_config_dict.get("keywords", []) + target_dict.get("keywords", [])
+    keywords = (source_config_dict.get("keywords") or []) + (target_dict.get("keywords") or []) + (global_block_dict.get("keywords") or [])
     container_events = (source_config_dict.get("container_events") or []) + (target_dict.get("container_events") or [])
     defaults = merge_defaults(
         precedence=target_dict,
         fallback=merge_defaults(
             precedence=source_config_dict.get("defaults", {}),
-            fallback=global_config_dict.get("defaults", {}),
+            fallback=global_block_dict.get("defaults", {}),
         ),
     )
 
