@@ -45,7 +45,11 @@ class BaseConfigModel(BaseModel):
     @classmethod
     def log_extra_fields(cls, data: Any) -> Any:
         if not strict_config_validation() and isinstance(data, dict):
-            unknown = set(data.keys()) - set(cls.model_fields.keys())
+            known = set(cls.model_fields.keys())
+            for field_info in cls.model_fields.values():
+                if field_info.alias:
+                    known.add(field_info.alias)
+            unknown = set(data.keys()) - known
             if unknown:
                 f = "fields" if len(unknown) > 1 else "field"
                 logger.warning(

@@ -11,7 +11,7 @@ Mount the directory containing your config and run:
 ```bash
 docker run --rm \
   -v /path/to/your/config/dir:/config \
-  clemcer/loggifly-migrate:latest
+  clemcer/loggifly-migrate:v2
 ```
 
 By default the script reads `/config/config.yaml` and writes `/config/configv2.yaml`.
