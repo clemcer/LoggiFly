@@ -34,6 +34,14 @@ def _prepare_for_ruamel(data: Any) -> Any:
     return data
 
 
+TEMPLATE_VAR_RENAMES = {
+    "action_result_message": "container_action_result_message",
+    "action_type": "container_action_type",
+    "action_string": "container_action_string",
+    "action_target": "container_action_target",
+    "action_succeeded": "container_action_succeeded",
+}
+
 FIELD_RENAMES = {
     "action": "container_action",
     "hide_regex_in_title": "hide_full_regex",
@@ -363,12 +371,25 @@ def _migrate_template_syntax(template: str) -> str:
     return re.sub(r'(?<!\{)\{([a-zA-Z_]\w*(?:\[[^\]]*\])*(?:![rsa])?(?::[^}]*)?)\}(?!\})', convert_match, template)
 
 
+def _rename_template_vars(template: str) -> str:
+    """Rename action_* template variables to container_action_* in a Jinja2 template string."""
+    for old, new in TEMPLATE_VAR_RENAMES.items():
+        # Match {{ old_var }} with optional whitespace, as a whole word (not a substring)
+        pattern = r'(\{\{[\s]*)' + re.escape(old) + r'([\s]*\}\})'
+        replacement = r'\g<1>' + new + r'\2'
+        template, count = re.subn(pattern, replacement, template)
+        if count:
+            _log_message(f"Renamed template variable '{old}' to '{new}'")
+    return template
+
+
 def _migrate_templates_in_config(config: Any) -> Any:
     """Recursively walk config and migrate title_template / message_template values."""
     if isinstance(config, dict):
         for key, value in config.items():
             if key in ("title_template", "message_template") and isinstance(value, str):
                 migrated = _migrate_template_syntax(value)
+                migrated = _rename_template_vars(migrated)
                 if migrated != value:
                     _log_message(f"Migrated template syntax in '{key}': {value!r} -> {migrated!r}")
                 config[key] = migrated
