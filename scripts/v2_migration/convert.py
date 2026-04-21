@@ -16,6 +16,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 from load_configv1 import load_config
 from config.models.base import RootDefaultsConfig, SettingsConfig # type: ignore
 from config.models.root import RootConfig # type: ignore
+from config.models.docker import ContainerRule, SwarmRule # type: ignore
 from config.helpers import prettify_config_dict # type: ignore
 
 
@@ -143,8 +144,8 @@ def _clean_settings(settings: dict) -> dict:
     return clean
 
 def _convert_hosts_containers_section(hosts: dict) -> list[dict]:
-    """Convert legacy hosts section to rules with scope."""
-    rules = []
+    """Convert legacy hosts section to one group per host."""
+    groups = []
 
     for host_name, host_config in hosts.items():
         if host_config is None:
@@ -154,48 +155,45 @@ def _convert_hosts_containers_section(hosts: dict) -> list[dict]:
         host_excluded = host_config.get("excluded_containers", [])
         host_containers = host_config.get("containers", {})
 
-        # Handle host-level monitor_all
+        group: dict[str, Any] = {
+            "scope": {"hosts": [host_name]},
+            "rules": [],
+        }
+
+        if host_excluded:
+            group["never_monitor"] = {"container_names": host_excluded}
+            _log_message(f"Converted hosts.{host_name}.excluded_containers to group never_monitor")
+
         if host_monitor_all:
-            r = {
-                    "id": f"monitor-all-on-{host_name}",
-                    "scope": {"hosts": [host_name]},
-                    "match": {
-                        "include": {"container_names": ["*"]},
-                        },
-                }
-            if host_excluded:
-                r["match"]["exclude"] = {"container_names": host_excluded}
-            rules.append(r)
-            _log_message(
-                f"Converted hosts.{host_name}.monitor_all_containers to scoped rule"
-            )
+            group["rules"].append({
+                "id": f"monitor-all-on-{host_name}",
+                "match": {"include": {"container_names": ["*"]}},
+            })
+            _log_message(f"Converted hosts.{host_name}.monitor_all_containers to wildcard rule in group")
 
-        # Convert host-specific containers
         for container_name, container_config in host_containers.items():
-            if container_name in host_excluded:
-                _log_message(f"Container '{container_name}' is excluded on host '{host_name}', skipping")
-                continue
-
             if container_config is None:
                 container_config = {}
 
-            rule = {
+            rule: dict[str, Any] = {
                 "id": f"{container_name}-on-{host_name}",
                 "container_name": container_name,
-                "scope": {"hosts": [host_name]},
             }
-
-            # Copy container config
             for key, value in container_config.items():
-                if value is not None and key != "hosts":
+                if value is not None and key in ContainerRule.model_fields:
                     rule[key] = value
+                elif value is not None:
+                    _log_message(f"WARNING: Unknown field '{key}' in hosts.{host_name}.containers.{container_name}, skipping")
 
-            rules.append(rule)
-            _log_message(
-                f"Converted hosts.{host_name}.containers.{container_name} to scoped rule"
-            )
+            group["rules"].append(rule)
+            _log_message(f"Converted hosts.{host_name}.containers.{container_name} to rule in group")
 
-    return rules
+        if group["rules"]:
+            groups.append(group)
+        else:
+            _log_message(f"Skipping empty group for host '{host_name}' (no rules generated)")
+
+    return groups
 
 
 def _convert_swarm(
@@ -248,8 +246,10 @@ def _convert_swarm(
                 _log_message(f"Converted hosts field to scope.hosts for '{name}'")
             # Copy remaining config (keywords, container_events, modular settings)
             for key, value in config.items():
-                if value is not None and key != "hosts":
+                if value is not None and key in SwarmRule.model_fields:
                     rule[key] = value
+                elif value is not None:
+                    _log_message(f"WARNING: Unknown field '{key}' in swarm_services.{name}, skipping")
             rules.append(rule)
             _log_message(f"Converted swarm service '{name}' to rule")
 
@@ -284,8 +284,9 @@ def _convert_containers(
     # Handle hosts section
     hosts = old_config.get("hosts", {})
     if hosts:
-        host_rules = _convert_hosts_containers_section(hosts)
-        rules = host_rules + rules
+        host_groups = _convert_hosts_containers_section(hosts)
+        if host_groups:
+            output["groups"] = host_groups
 
     # Handle monitor_all_containers
     if monitor_all_containers:
@@ -314,8 +315,10 @@ def _convert_containers(
                 _log_message(f"Converted hosts field to scope.hosts for '{name}'")
             # Copy remaining config (keywords, container_events, modular settings)
             for key, value in config.items():
-                if value is not None and key != "hosts":
+                if value is not None and key in ContainerRule.model_fields:
                     rule[key] = value
+                elif value is not None:
+                    _log_message(f"WARNING: Unknown field '{key}' in containers.{name}, skipping")
             rules.append(rule)
             _log_message(f"Converted container '{name}' to rule")
 

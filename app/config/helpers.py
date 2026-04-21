@@ -380,9 +380,8 @@ def validate_trigger_on(v: Any) -> dict | None:
 
 def validate_and_generate_ids(data: Any, source_name: str) -> Any:
 
-    def _process_items(items: list[dict], prefix: str, label: str):
-        # First pass: collect all valid explicit IDs and detect duplicates
-        seen: set[str] = set()
+    def _process_items(items: list[dict], prefix: str, label: str, seen: set[str]):
+        # First pass: collect explicit IDs, detect cross-list duplicates
         for item in items:
             item_id = item.get("id")
             if item_id is None:
@@ -392,7 +391,6 @@ def validate_and_generate_ids(data: Any, source_name: str) -> Any:
                 item.pop("id")
             else:
                 seen.add(item_id)
-
         # Second pass: generate IDs for items that don't have one, avoiding collisions
         counter = 1
         for item in items:
@@ -404,8 +402,12 @@ def validate_and_generate_ids(data: Any, source_name: str) -> Any:
                 counter += 1
 
     if isinstance(data, dict):
-        _process_items(data.get("rules", []), "rule", f"{source_name}.rules")
-        _process_items(data.get("overlays", []), "overlay", f"{source_name}.overlays")
+        shared_seen: set[str] = set()
+        _process_items(data.get("rules", []), "rule", f"{source_name}.rules", shared_seen)
+        for i, group in enumerate(data.get("groups", [])):
+            if isinstance(group, dict):
+                group_rules = group.get("rules", [])
+                _process_items(group_rules, f"group-{i}-rule", f"{source_name}.groups[{i}].rules", shared_seen)
     return data
 
 

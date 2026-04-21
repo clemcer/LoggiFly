@@ -18,6 +18,7 @@ from config.helpers import (
     validate_container_events,
     validate_and_generate_ids,
     convert_shorthand_to_match,
+    handle_error,
 )
 
 
@@ -80,6 +81,22 @@ class ContainerRule(RuleBase):
         return data
 
 
+class ContainerGroupConfig(KeywordBase, ContainerEventBase):
+    """A group of container monitoring rules sharing common config (scope, defaults, keywords)."""
+
+    scope: Optional[ScopeConfig] = Field(None, description="Restrict this group to specific Docker hosts. AND-combined with source-level scope.")
+    never_monitor: Optional[ContainerMatchCriteria] = Field(None, description="Containers excluded from monitoring within this group only.")
+    defaults: Optional[ModularDefaultsConfig] = Field(None, description="Default settings applied to all rules in this group.")
+    rules: List[ContainerRule] = Field(description="Rules within this group. At least one rule is required.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_rules(cls, data: dict) -> dict:
+        if not data.get("rules"):
+            handle_error("A group must have at least one rule.")
+        return data
+
+
 class ContainerSourceConfig(KeywordBase, ContainerEventBase):
     """Top-level configuration for Docker container monitoring."""
 
@@ -87,6 +104,7 @@ class ContainerSourceConfig(KeywordBase, ContainerEventBase):
     never_monitor: Optional[ContainerMatchCriteria] = Field(None, description="Containers that should never be monitored, regardless of other rules.")
     defaults: Optional[ModularDefaultsConfig] = Field(None, description="Default settings applied to all container rules.")
     rules: Optional[List[ContainerRule]] = Field(None, description="List of container monitoring rules.")
+    groups: Optional[List[ContainerGroupConfig]] = Field(None, description="Groups of rules sharing common config (scope, defaults, keywords).")
 
     @model_validator(mode="wrap")
     @classmethod
@@ -137,6 +155,22 @@ class SwarmRule(RuleBase):
         data = convert_shorthand_to_match(data, {"stack_name": "stack_names", "service_name": "service_names"})
         return data
 
+class SwarmGroupConfig(KeywordBase, ContainerEventBase):
+    """A group of Swarm service monitoring rules sharing common config (scope, defaults, keywords)."""
+
+    scope: Optional[ScopeConfig] = Field(None, description="Restrict this group to specific Docker hosts. AND-combined with source-level scope.")
+    never_monitor: Optional[SwarmMatchCriteria] = Field(None, description="Swarm services excluded from monitoring within this group only.")
+    defaults: Optional[ModularDefaultsConfig] = Field(None, description="Default settings applied to all rules in this group.")
+    rules: List[SwarmRule] = Field(description="Rules within this group. At least one rule is required.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_rules(cls, data: dict) -> dict:
+        if not data.get("rules"):
+            handle_error("A group must have at least one rule.")
+        return data
+
+
 class SwarmSourceConfig(KeywordBase, ContainerEventBase):
     """Top-level configuration for Docker Swarm service monitoring."""
 
@@ -144,6 +178,7 @@ class SwarmSourceConfig(KeywordBase, ContainerEventBase):
     never_monitor: Optional[SwarmMatchCriteria] = Field(None, description="Swarm services that should never be monitored, regardless of other rules.")
     defaults: Optional[ModularDefaultsConfig] = Field(None, description="Default settings applied to all Swarm rules.")
     rules: Optional[List[SwarmRule]] = Field(None, description="List of Swarm service monitoring rules.")
+    groups: Optional[List[SwarmGroupConfig]] = Field(None, description="Groups of rules sharing common config (scope, defaults, keywords).")
 
     @model_validator(mode="wrap")
     @classmethod

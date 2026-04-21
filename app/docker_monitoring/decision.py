@@ -15,6 +15,9 @@ from config.models import (
     ContainerRule,
     SwarmRule,
     LabelConfig,
+    ContainerGroupConfig,
+    SwarmGroupConfig,
+    ScopeConfig,
 )
 from docker_monitoring.helpers import ContainerSnapshot, parse_label_config
 from monitoring import EffectiveTargetConfig
@@ -79,6 +82,14 @@ def validate_label_config(labels: dict, target_name: str) -> dict | None:
     return None
 
 
+def _intersect_scopes(scopes: list[ScopeConfig | None], hostname: str) -> bool:
+    """Return True if hostname passes all scopes (AND semantics). Omitting a scope = pass."""
+    for scope in scopes:
+        if scope and scope.hosts and not matches_glob_list(hostname, scope.hosts):
+            return False
+    return True
+
+
 def is_matched_rule(rule: ContainerRule | SwarmRule, filter_mapping: dict[str, str], hostname: str) -> bool:
     """Check if a rule matches the given filter values and hostname.
 
@@ -86,9 +97,8 @@ def is_matched_rule(rule: ContainerRule | SwarmRule, filter_mapping: dict[str, s
     """
     if not rule.enabled:
         return False
-    if rule.scope and rule.scope.hosts:
-        if not matches_glob_list(hostname, rule.scope.hosts):
-            return False
+    if not _intersect_scopes([rule.scope], hostname):
+        return False
     if rule.match.exclude:
         for k, v in filter_mapping.items():
             if pattern_list := getattr(rule.match.exclude, k, None):
@@ -104,7 +114,7 @@ def is_matched_rule(rule: ContainerRule | SwarmRule, filter_mapping: dict[str, s
 
 
 def merge_rules(rules: List[ContainerRule | SwarmRule]) -> dict:
-    """Merge matched rules into a single config dict. Later entries take precedence."""
+    """Merge matched rules into a single config dict. Later entries take precedence. Group config is handled separately in create_target_config."""
     result = {}
     for ro in rules:
         result = merge_with_precedence(
@@ -117,23 +127,38 @@ def merge_rules(rules: List[ContainerRule | SwarmRule]) -> dict:
 def create_target_config(
     snapshot: ContainerSnapshot,
     validated_label_config: dict | None,
-    target_dict: dict,
+    rules: List[ContainerRule | SwarmRule],
     source_config: ContainerSourceConfig | SwarmSourceConfig | None,
+    group_configs: List[ContainerGroupConfig | SwarmGroupConfig],
     global_config: RootConfig,
 ) -> EffectiveTargetConfig:
     """Build the effective target config by merging: global defaults < source defaults < rules < labels."""
+    merged_rules = merge_rules(rules)
     global_block_dict = global_config.global_config.model_dump(exclude_none=True)
     source_config_dict = source_config.model_dump(exclude_none=True) if source_config else {}
+    group_config_dicts = [group.model_dump(exclude_none=True) for group in group_configs]
 
-    keywords = (source_config_dict.get("keywords") or []) + (target_dict.get("keywords") or []) + (global_block_dict.get("keywords") or [])
-    container_events = (source_config_dict.get("container_events") or []) + (target_dict.get("container_events") or [])
-    defaults = merge_defaults(
-        precedence=target_dict,
-        fallback=merge_defaults(
-            precedence=source_config_dict.get("defaults", {}),
-            fallback=global_block_dict.get("defaults", {}),
-        ),
+    group_keywords = [kw for g in group_config_dicts for kw in (g.get("keywords") or [])]
+    group_events = [ev for g in group_config_dicts for ev in (g.get("container_events") or [])]
+    keywords = (
+        (source_config_dict.get("keywords") or [])
+        + group_keywords
+        + (merged_rules.get("keywords") or [])
+        + (global_block_dict.get("keywords") or [])
     )
+    container_events = (
+        (source_config_dict.get("container_events") or [])
+        + group_events
+        + (merged_rules.get("container_events") or [])
+    )
+    # Merge order: global (lowest) < source < group < rule (highest)
+    baseline_defaults = {}
+    for d in [global_block_dict, source_config_dict] + group_config_dicts:
+        baseline_defaults = merge_with_precedence(
+            precedence=d.get("defaults", {}),
+            fallback=baseline_defaults,
+        )
+    defaults = merge_defaults(precedence=merged_rules, fallback=baseline_defaults)
 
     effective = {
         "keywords": keywords,
@@ -342,21 +367,35 @@ class MonitorDecision:
                 return cls(result=cls.Result.SKIP, reason="skipped via never_monitor")
 
         # 3. Host scope
-        if source_config and source_config.scope and source_config.scope.hosts:
-            if not matches_glob_list(hostname, source_config.scope.hosts):
-                return cls(result=cls.Result.SKIP, reason="skipped via scope")
+        if source_config and not _intersect_scopes([source_config.scope], hostname):
+            return cls(result=cls.Result.SKIP, reason="skipped via scope")
 
         # 4. Find matching rules
-        rules = []
+        rules = []  # list of (rule, group | None)
+        groups = []
         if source_config and source_config.rules:
             for rule in source_config.rules:
                 if is_matched_rule(rule, filter_mapping, hostname):
                     rules.append(rule)
+
+        if source_config and source_config.groups:
+            for group in source_config.groups:
+                # Group scope
+                if not _intersect_scopes([source_config.scope, group.scope], hostname):
+                    continue
+                # Group never_monitor
+                if group.never_monitor and never_monitor_check(group.never_monitor):
+                    continue
+                for rule in group.rules:
+                    if is_matched_rule(rule, filter_mapping, hostname):
+                        rules.append(rule)
+                        if group not in groups:
+                            groups.append(group)
         matched_rule_ids = [rule.id for rule in rules]
 
         # 5. Determine if target should be monitored
         if rules:
-            if label_decision == LabelDecision.MONITOR:
+            if validated_label_config is not None:
                 reason = f"monitored via {label_source} and rules {tuple(matched_rule_ids)}"
             else:
                 reason = f"monitored via rules {tuple(matched_rule_ids)}"
@@ -369,12 +408,13 @@ class MonitorDecision:
             )
 
         # 7. Build effective config
-        merged_rule = merge_rules(rules)
+        
         target_config = create_target_config(
             snapshot=snapshot,
             validated_label_config=validated_label_config,
-            target_dict=merged_rule,
+            rules=rules,
             source_config=source_config,
+            group_configs=groups,
             global_config=global_config,
         )
 
