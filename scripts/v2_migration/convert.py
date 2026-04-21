@@ -524,9 +524,9 @@ IMPORTANT: If you see warnings during validation they refer to invalid fields in
     # Final Validation
     _log_phase(
 """
-Phase 6: Final validation... The new config will now be validated against the v2 model.
-While errors during validation are unlikely, if there are any, invalid fields are  mostly ignored. 
-If you see any warnings during validation make sure that no important settings are lost
+Phase 6: Validating migrated config against the v2 schema...
+Validation errors are unlikely, but if there are any, invalid fields will be dropped. 
+Review any warnings below to confirm no important settings were lost.
 """)
 
     os.environ["STRICT_CONFIG"] = "false"

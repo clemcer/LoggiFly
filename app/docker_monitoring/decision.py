@@ -70,10 +70,11 @@ def check_label(labels: dict | None) -> LabelDecision:
     return LabelDecision.UNKNOWN
 
 
-def validate_label_config(labels: dict, target_name: str) -> dict | None:
+def validate_label_config(labels: dict, target_name: str, monitor_type: MonitorType | None = None) -> dict | None:
     """Validate parsed label config using LabelConfig model. Returns dict or None on failure."""
     try:
-        label_config = LabelConfig.model_validate(labels)
+        context = {"monitor_type": monitor_type} if monitor_type is not None else None
+        label_config = LabelConfig.model_validate(labels, context=context)
         return label_config.model_dump(exclude_none=True) if label_config else None
     except ValidationError as e:
         logger.error(f"Error validating label config for {target_name}: {format_pydantic_error(e)}")
@@ -264,6 +265,7 @@ class MonitorDecision:
             label_sources=[(snapshot.labels, "container labels")],
             filter_mapping={"container_names": snapshot.name},
             never_monitor_check=lambda nm: matches_glob_list(snapshot.name, nm.container_names),
+            monitor_type=MonitorType.CONTAINER,
         )
 
     @classmethod
@@ -299,6 +301,7 @@ class MonitorDecision:
             ],
             filter_mapping=filter_mapping,
             never_monitor_check=never_monitor_check,
+            monitor_type=MonitorType.SWARM,
         )
 
     # ── Core decision logic (shared) ────────────────────────────────
@@ -314,6 +317,7 @@ class MonitorDecision:
         label_sources: list[tuple[dict | None, str]],
         filter_mapping: dict[str, str],
         never_monitor_check: Callable,
+        monitor_type: MonitorType | None = None,
     ) -> 'MonitorDecision':
 
         # 1. Check labels (iterate sources in priority order)
@@ -334,7 +338,7 @@ class MonitorDecision:
                 label_source = source_name
                 ignore_config = labels.get("loggifly.ignore_config", "false").lower() == "true"
                 parsed = parse_label_config(labels)
-                validated_label_config = validate_label_config(parsed, target_name)
+                validated_label_config = validate_label_config(parsed, target_name, monitor_type)
 
                 if ignore_config:
                     if validated_label_config is not None:

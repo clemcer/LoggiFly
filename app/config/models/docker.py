@@ -201,6 +201,18 @@ class LabelConfig(KeywordBase, ContainerEventBase, ModularDefaultsConfig):
     monitor: Optional[bool] = None
     ignore_config: Optional[bool] = None
 
+    @model_validator(mode="wrap")
+    @classmethod
+    def _inject_ctx(cls, data, handler, info):
+        monitor_type = (info.context or {}).get("monitor_type")
+        if monitor_type is not None:
+            token = _validation_ctx.set({"monitor_type": monitor_type})
+            try:
+                return handler(data)
+            finally:
+                _validation_ctx.reset(token)
+        return handler(data)
+
     @model_validator(mode="after")
     def unset_fields(self) -> 'LabelConfig':
         self.monitor = None
