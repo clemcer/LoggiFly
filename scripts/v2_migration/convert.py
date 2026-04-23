@@ -439,10 +439,41 @@ def _convert_secretstr(config):
 
 def convert(path: str = "/config/config.yaml", output_path: str = "/config/configv2.yaml"):
 
-    # detect if config is already v2
-    try: 
+    input_path = Path(path)
+    if not input_path.exists():
+        _log_message(
+            f"Error: Input file not found: '{path}'\n"
+            f"  Make sure you mounted the correct directory. Example:\n"
+            f"    docker run --rm -v /path/to/your/config:/config ghcr.io/clemcer/loggifly-migrate:v1-to-v2"
+        )
+        sys.exit(1)
+    if not input_path.is_file():
+        _log_message(
+            f"Error: '{path}' is not a readable file (found a directory at that path).\n"
+            f"  This can happen when Docker creates the mount target as a directory\n"
+            f"  because the source path does not exist on the host or is itself a directory.\n"
+            f"  Mount the parent directory of your config.yaml instead:\n"
+            f"    docker run --rm -v /path/to/your/config:/config ghcr.io/clemcer/loggifly-migrate:v1-to-v2"
+        )
+        sys.exit(1)
+
+    output_dir = Path(output_path).parent
+    if not output_dir.exists():
+        _log_message(
+            f"Error: Output directory does not exist: '{output_dir}'\n"
+            f"  Make sure the output path is within a mounted volume."
+        )
+        sys.exit(1)
+
+    try:
         with open(path, "r") as f:
             config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        _log_message(f"Error: Failed to parse YAML in '{path}':\n  {e}")
+        sys.exit(1)
+    except PermissionError:
+        _log_message(f"Error: Permission denied reading '{path}'.")
+        sys.exit(1)
     except Exception as e:
         _log_message(f"Error loading config: {e}")
         sys.exit(1)
@@ -569,8 +600,16 @@ Review any warnings below to confirm no important settings were lost.
 
     yaml_str = re.sub(r'\n([a-zA-Z_])', r'\n\n\1', yaml_str)
 
-    with open(output_path, "w") as f:
-        f.write(yaml_str)
+    try:
+        with open(output_path, "w") as f:
+            f.write(yaml_str)
+    except PermissionError:
+        _log_message(f"Error: Permission denied writing to '{output_path}'. Check volume mount permissions.")
+        sys.exit(1)
+    except Exception as e:
+        _log_message(f"Error writing output file: {e}")
+        sys.exit(1)
+    _log_message(f"\nMigration complete. Output written to: {output_path}")
     return output
 
 
