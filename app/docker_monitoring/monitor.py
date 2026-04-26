@@ -723,7 +723,7 @@ class DockerLogMonitor:
         ce = next((ce for ce in reversed(configured_events) if ce.event == event_type), None) 
         if not ce:
             return
-        self.logger.debug(f"Event {event_type} for container {ctx.target_name} is configured. Processing event.")
+        self.logger.debug(f"Event '{event_type}' for container '{ctx.target_name}' is configured. Processing event.")
 
         trigger_level_config = ce.model_dump(exclude_none=True)
         trigger_context = merge_trigger_context(trigger_level_config, ctx.target_config_dict)
@@ -731,13 +731,13 @@ class DockerLogMonitor:
         trigger_cooldown = trigger_context.get("trigger_cooldown")
         assert trigger_cooldown is not None, "trigger_cooldown must be set"
         if self.event_trigger_tracker.is_on_cooldown(event_type, trigger_cooldown):
-            self.logger.debug(f"Event {event_type} for container {ctx.target_name} is on cooldown. Skipping trigger.")
+            self.logger.info(f"Event '{event_type}' for container '{ctx.target_name}' is on cooldown. Skipping trigger.")
             return
         trigger_on = trigger_level_config.get("trigger_on")
         if self.event_trigger_tracker.record_match(event_type, trigger_on):
-            self.logger.debug(f"Event {event_type} for container {ctx.target_name} triggered. Processing trigger.")
+            self.logger.info(f"Event '{event_type}' for container '{ctx.target_name}' triggered. Processing trigger.")
         else:
-            self.logger.debug(f"Event {event_type} for container {ctx.target_name} not triggered. Skipping trigger.")
+            self.logger.debug(f"Event '{event_type}' for container '{ctx.target_name}' not triggered. Skipping trigger.")
             return
 
         exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)

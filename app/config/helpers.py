@@ -404,10 +404,10 @@ def validate_and_generate_ids(data: Any, source_name: str) -> Any:
     if isinstance(data, dict):
         shared_seen: set[str] = set()
         _process_items(data.get("rules", []), "rule", f"{source_name}.rules", shared_seen)
-        for i, group in enumerate(data.get("groups", [])):
+        for idx, group in enumerate(data.get("groups", []), 1):
             if isinstance(group, dict):
                 group_rules = group.get("rules", [])
-                _process_items(group_rules, f"group-{i}-rule", f"{source_name}.groups[{i}].rules", shared_seen)
+                _process_items(group_rules, f"group-{idx}-rule", f"{source_name}.groups[{idx}].rules", shared_seen)
     return data
 
 

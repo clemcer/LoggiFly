@@ -2,10 +2,11 @@ import os
 import logging
 import yaml
 from typing import Any
+from pydantic import ValidationError
 from constants import NotificationPrefix
 from config.models.root import RootConfig
 from config.models.base import SettingsConfig, RootDefaultsConfig, NotificationDefaults, SystemNotifications
-from config.helpers import stringify_numbers, get_pretty_yaml_config
+from config.helpers import stringify_numbers, get_pretty_yaml_config, format_pydantic_error
 from utils import get_env_var, is_true_env_var
 
 CONFIG_PATH = get_env_var("CONFIG_PATH", fallback_value="/config/config.yaml") or "/config/config.yaml"
@@ -184,7 +185,18 @@ def load_config(path: str = CONFIG_PATH):
     yaml_config = stringify_numbers(yaml_config)
     
     yaml_config = override_with_env(cnf=yaml_config)
-    config = RootConfig.model_validate(yaml_config)
+    try:
+        config = RootConfig.model_validate(yaml_config)
+    except ValidationError as e:
+        logging.debug(e)
+        error_message = (
+            f"Config validation failed: {format_pydantic_error(e)} (Enable Debug Logging (via env) to see full pydantic error)\n"
+            "You can also set the environment variable STRICT_CONFIG to false to ignore (most) validation errors and only log warnings instead. "
+            "However this means that the parts of the config causing the error might get ignored and not applied.  You should always double check for any warnings if you decide to do this."
+            )
+        raise ConfigLoadError(error_message)
+    except Exception as e:
+        raise ConfigLoadError(f"Unexpected error loading config: {e}")
 
     yaml_output = get_pretty_yaml_config(config)
     logging.info(f"\n ------------- CONFIG ------------- \n{yaml_output}\n ----------------------------------")

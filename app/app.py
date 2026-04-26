@@ -12,7 +12,6 @@ from dataclasses import dataclass
 import socket
 from docker.tls import TLSConfig
 from urllib.parse import urlparse
-from pydantic import ValidationError
 from typing import List
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -140,11 +139,9 @@ class ConfigHandler(FileSystemEventHandler):
         logging.info("Config change detected, reloading config...")
         try:
             new_config, _ = load_config()
-        except (ValidationError, ConfigLoadError) as e:
-            if isinstance(e, ValidationError):
-                logging.critical(f"Config validation failed (keeping old config): {format_pydantic_error(e)}")
-            else:
-                logging.critical("Config loading failed (keeping old config)")
+        except ConfigLoadError as e:
+            logging.critical(e)
+            logging.info("Keeping old config since config loading failed.")
             return
 
         # Only update if loading and validation succeeded
@@ -410,13 +407,9 @@ def start_loggifly():
     logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
     try:
         config, path = load_config()
-    except (ValidationError, ConfigLoadError) as e:
-        if isinstance(e, ValidationError):
-            logging.critical(f"Config validation failed: {format_pydantic_error(e)} (Enable Debug Logging (via env) to see full pydantic error)")
-            logging.debug(e)
-        else:
-            logging.critical("Config loading failed")
-        logging.info("Waiting 5s to prevent restart loop...")
+    except ConfigLoadError as e:
+        logging.critical(e)
+        logging.info("Config loading Failed. Waiting 5s to prevent restart loop...")
         time.sleep(5)
         sys.exit(1)
 

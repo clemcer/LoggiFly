@@ -121,7 +121,7 @@ def get_notification_config(modular_settings: dict, global_service_config: dict,
     return merge_with_precedence(
         _normalize_and_strip_prefix(modular_settings, prefix, keys),
         _normalize_and_strip_prefix(global_service_config, prefix, keys),
-        # ntfy_actions, webhook_headers, ntfy_headers override each other and are not merged
+        # ntfy_actions, webhook_headers, ntfy_headers override each other and are not merged with settings from defaults
         list_union=False,
         dict_merge=False,
     )

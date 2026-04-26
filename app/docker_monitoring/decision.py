@@ -375,13 +375,12 @@ class MonitorDecision:
             return cls(result=cls.Result.SKIP, reason="skipped via scope")
 
         # 4. Find matching rules
-        rules = []  # list of (rule, group | None)
-        groups = []
+        rules = []
         if source_config and source_config.rules:
             for rule in source_config.rules:
                 if is_matched_rule(rule, filter_mapping, hostname):
                     rules.append(rule)
-
+        groups = []
         if source_config and source_config.groups:
             for group in source_config.groups:
                 # Group scope
