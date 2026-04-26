@@ -10,7 +10,7 @@ from constants import (
     NotificationType,
 )
 from notification_formatter import NotificationContext
-from utils import merge_trigger_context, merge_with_precedence, TriggerTracker
+from utils import merge_trigger_context, merge_config_levels, TriggerTracker
 from trigger import process_trigger
 from config.models import RootConfig
 from monitoring import MonitoredTarget, EffectiveTargetConfig
@@ -291,11 +291,9 @@ class LogProcessor:
                 merge_matches = keyword_dict.get("merge_matches", target_merge_matches)
                 if merge_matches is True:
                     # last override first
-                    keyword_level_config = merge_with_precedence(
+                    keyword_level_config = merge_config_levels(
                         precedence=keyword_dict,
                         fallback=keyword_level_config,
-                        list_union=True,
-                        dict_merge=True,
                     )
                     keywords_found.append(found)
                 else:

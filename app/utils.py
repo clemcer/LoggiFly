@@ -141,18 +141,28 @@ def merge_with_precedence(
     return merged
 
 
+def merge_config_levels(precedence: dict, fallback: dict, possible_keys: list[str] | tuple[str, ...] | None = None) -> dict:
+    return merge_with_precedence(
+        precedence, 
+        fallback, 
+        keys=possible_keys, 
+        list_union=True, 
+        dict_merge=True,
+    )
+    
+
 def merge_trigger_context(precedence: dict, fallback: dict) -> dict:
     """Wrapper that applies schema keys from ModularSettings."""
     from config.models.base import TriggerActionsBase
     possible_keys = tuple(TriggerActionsBase.model_fields.keys())
-    return merge_with_precedence(precedence, fallback, keys=possible_keys, list_union=True, dict_merge=True)
+    return merge_config_levels(precedence, fallback, possible_keys)
 
 
 def merge_defaults(precedence: dict, fallback: dict) -> dict:
     """Merge defaults with precedence."""
     from config.models.base import RootDefaultsConfig
     possible_keys = tuple(RootDefaultsConfig.model_fields.keys())
-    return merge_with_precedence(precedence, fallback, keys=possible_keys, list_union=True, dict_merge=True)
+    return merge_config_levels(precedence, fallback, possible_keys)
 
 
 def convert_to_int(val, fallback_value: int = 0, min_value: int = 0) -> int:
