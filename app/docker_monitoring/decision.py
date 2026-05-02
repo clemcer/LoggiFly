@@ -399,9 +399,9 @@ class MonitorDecision:
         # 5. Determine if target should be monitored
         if rules:
             if validated_label_config is not None:
-                reason = f"monitored via {label_source} and rules {tuple(matched_rule_ids)}"
+                reason = f"monitored via {label_source} and rules: {', '.join(matched_rule_ids)}"
             else:
-                reason = f"monitored via rules {tuple(matched_rule_ids)}"
+                reason = f"monitored via rules: {', '.join(matched_rule_ids)}"
         elif validated_label_config is not None:
             reason = f"monitored via {label_source} (no rules matched)"
         else:

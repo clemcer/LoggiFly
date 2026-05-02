@@ -4,6 +4,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent / "app"))
 
 import argparse
 import re
+import traceback
 import yaml
 import sys
 from io import StringIO
@@ -79,6 +80,8 @@ def _migrate_field_names(config_copy: dict, old: str, new: str, exclude_values: 
             continue
         if key == old and new not in config_copy:
             keys_to_migrate.append(key)
+        elif key == old and new in config_copy:
+            _log_message(f"WARNING: Both '{old}' and '{new}' found — keeping '{new}', dropping '{old}'")
         elif isinstance(value, dict):
             _migrate_field_names(value, old, new, exclude_values, exclude_keys)
         elif isinstance(value, list):
@@ -180,9 +183,9 @@ def _convert_hosts_containers_section(hosts: dict) -> list[dict]:
                 "container_name": container_name,
             }
             for key, value in container_config.items():
-                if value is not None and key in ContainerRule.model_fields:
+                if value is not None and value != [] and key in ContainerRule.model_fields:
                     rule[key] = value
-                elif value is not None:
+                elif value is not None and value != []:
                     _log_message(f"WARNING: Unknown field '{key}' in hosts.{host_name}.containers.{container_name}, skipping")
 
             group["rules"].append(rule)
@@ -246,9 +249,9 @@ def _convert_swarm(
                 _log_message(f"Converted hosts field to scope.hosts for '{name}'")
             # Copy remaining config (keywords, container_events, modular settings)
             for key, value in config.items():
-                if value is not None and key in SwarmRule.model_fields:
+                if value is not None and value != [] and key in SwarmRule.model_fields:
                     rule[key] = value
-                elif value is not None:
+                elif value is not None and value != []:
                     _log_message(f"WARNING: Unknown field '{key}' in swarm_services.{name}, skipping")
             rules.append(rule)
             _log_message(f"Converted swarm service '{name}' to rule")
@@ -315,9 +318,9 @@ def _convert_containers(
                 _log_message(f"Converted hosts field to scope.hosts for '{name}'")
             # Copy remaining config (keywords, container_events, modular settings)
             for key, value in config.items():
-                if value is not None and key in ContainerRule.model_fields:
+                if value is not None and value != [] and key in ContainerRule.model_fields:
                     rule[key] = value
-                elif value is not None:
+                elif value is not None and value != []:
                     _log_message(f"WARNING: Unknown field '{key}' in containers.{name}, skipping")
             rules.append(rule)
             _log_message(f"Converted container '{name}' to rule")
@@ -347,7 +350,7 @@ def _migrate_template_syntax(template: str) -> str:
             _log_message(f"WARNING: Conversion flag '!{flag}' in template field '{{{raw}}}' is not supported in Jinja2 and was dropped.")
             raw = root_for_flag[:flag_idx] + (raw[bracket_pos_for_flag:] if bracket_pos_for_flag != -1 else "")
 
-        # Strip format spec (:...) — only on root field (before first [)
+        # Strip format spec (:...) - Only on root field (before first [)
         bracket_pos = raw.find('[')
         root = raw if bracket_pos == -1 else raw[:bracket_pos]
         rest = '' if bracket_pos == -1 else raw[bracket_pos:]
@@ -415,13 +418,14 @@ def _is_v1_config(config: dict) -> bool:
     if config.get("version") == 2:
         _log_message("Config seems to be in v2 format already ('version: 2' found in config), skipping conversion")
         return False
-    c = config.get("containers", {})
-    sw = config.get("swarm_services", {})
-    if config.get("defaults"):
+    if config.get("swarm") and not config.get("swarm_services"):
+        _log_message("Config seems to be in v2 format already ('swarm' found in config instead of 'swarm_services'), skipping conversion")
+    if config.get("global", {}).get("defaults"):
         _log_message("Config seems to be in v2 format already (contains defaults section), skipping conversion")
         return False
-    if any(tc.get("rules") for tc in (c, sw)):
-        _log_message("Config seems to be in v2 format already (contains rules section), skipping conversion")
+    c = config.get("containers", {})
+    if isinstance(c, dict) and c.get("rules"):
+        _log_message("Config seems to be in v2 format already ('containers:' contains rules section), skipping conversion")
         return False
     return True
 
@@ -478,8 +482,15 @@ def convert(path: str = "/config/config.yaml", output_path: str = "/config/confi
         _log_message(f"Error loading config: {e}")
         sys.exit(1)
 
+    if config is None:
+        _log_message(f"Error: '{path}' is empty. Nothing to convert.")
+        sys.exit(1)
+
+    if not isinstance(config, dict):
+        _log_message(f"Error: '{path}' does not contain a YAML mapping at the top level.")
+        sys.exit(1)
+
     if not _is_v1_config(config):
-        _log_message("Config does not seem to be in a proper v1 format, skipping conversion")
         return
     
     _log_phase("""
@@ -490,8 +501,7 @@ IMPORTANT: If you see warnings during validation they refer to invalid fields in
         configv1_8, _ = load_config(path)
     except Exception as e:
         _log_message(f"Error loading/validating v1 config: {e}")
-        import traceback
-        traceback.print_exc()
+        _log_message(traceback.format_exc())
         sys.exit(1)
 
     _log_phase("Phase 0.5: Preparing to convert v1 config to v2 config... Migrating field names...")

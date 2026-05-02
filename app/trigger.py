@@ -43,7 +43,6 @@ def _process_trigger(
         logger.debug(f"Processing trigger for {monitored_target.target_name} with trigger context: {trigger_context}")
         action_to_perform = trigger_context.get("container_action")
 
-        logger.debug(f"Action to perform: {action_to_perform}. Supports container actions: {monitored_target.supports_container_actions()}")
         # Perform action if configured and supported by this target type
         if action_to_perform is not None and monitored_target.supports_container_actions():
             action_cooldown = trigger_context.get("container_action_cooldown", 300)
