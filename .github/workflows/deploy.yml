@@ -48,7 +48,7 @@ jobs:
       # Python is needed to generate v2_schema.json from the Pydantic models
       # before VitePress builds the schema docs page (runs via predocs:build)
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Install Python dependencies
