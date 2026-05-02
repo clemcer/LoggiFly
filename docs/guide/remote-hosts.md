@@ -24,68 +24,63 @@ If you want to set a label to your _mounted docker socket_ you can do so by addi
 
 ### Assign Containers to Hosts
 
-#### Option 1: Assign containers to hosts via the `hosts` section
-
-You can easily configure your containers in the `config.yaml` file under `hosts.<your-hostname>`.
-The [labels](#labels) section above shows how the hostname is constructed.
+1. You can scope the entire `containers:` block to specific hosts by using the `scope.hosts` field. This means that only container on the specified hosts will be monitored.
 
 ```yaml
-hosts:
-  foo:
-    containers:
-      container1:
-        keywords:
-          - error
-  bar:
-    containers:
-      container2:
-        keywords:
-          - critical
 containers:
-  container3:
-    keywords:
-      - timeout
+  scope:
+    hosts: ["host1", "host2"]
 ```
 
-In the above example `container1` will only be monitored on host `foo` and `container2` will only be monitored on host `bar`. `container3` will be monitored on all hosts.
-
-::: info
-When a container is configured globally and on a specific host, the per-host configuration takes precedence.
-:::
-
-##### Monitor all containers on specific hosts
-
-The [settings](./config_sections/settings#monitor-all-containers-swarm-services) `monitor_all_containers` and `excluded_containers` also work per host
+2. You can scope individual rules to specific hosts using `scope.hosts` on the rule.
 
 ```yaml
-hosts:
-  foo:
-    monitor_all_containers: true
-    excluded_containers:
-      - container4
-  bar:
-    containers:
-      container5:
-        keywords:
-          - error
-```
-
-
-#### Option 2: Assign containers to hosts via the `hosts` field of the container configuration
-
-Another way to assign containers to specific hosts is by providing a comma-separated list of labels/hostnames in the `hosts` field of the container configuration.<br> 
-When no hosts are set LoggiFly will look for the container on _all_ configured remote hosts.
-
-Here is a short yaml snippet:
-
-  
-```yaml 
 containers:
-  container1:
-    hosts: foo,bar  # This container will only be monitored on hosts with the labels 'foo' and 'bar'
-    keywords:
-      - error
+  rules:
+    # only monitor my-app on hosts 1 and 2
+    - container_name: my-app
+      scope:
+        hosts:
+          - "host1"
+          - "host2"
+      keywords:
+        - keyword: "error"
+
+    # only monitor my-other-app on host3
+    - container_name: my-other-app
+      scope:
+        hosts: ["host3"]
+      container_events:
+        - event: crash
+
+    # monitor all containers on hosts 1 and 3 for "critical"
+    - container_name: "*"
+      scope:
+        hosts: ["host1", "host3"]
+      keywords:
+        - keyword: "critical"
 ```
+
+3. Use **[groups](./config/containers-and-rules#groups)** when you have multiple containers on the same host that each need different keywords or settings. A group can share its `scope` across all its rules, without repeating `scope.hosts` on each one.
+
+```yaml
+containers:
+  groups:
+    - scope:
+        hosts: ["my-remote-host"]
+      keywords:
+        - keyword: "critical"       # applied to every rule in this group
+      rules:
+        - container_name: my-app
+          keywords:
+            - keyword: error
+        - container_name: my-other-app
+          keywords:
+            - keyword: warning
+```
+
+See [Groups](./config/containers-and-rules#groups) for the full reference.
+
 
 ## Remote Hosts Example
 
@@ -123,6 +118,6 @@ services:
 The simplest way to use LoggiFly with remote hosts is to use a docker socket proxy. Just take a look at the [docker compose examples](./getting-started#docker-compose) and set up the socket proxy on your remote host.
 
 ::: info
-Container restart/stop actions are not supported when using a Docker Socket Proxy unless you use the compose example with `tecnativa/docker-socket-proxy` and `POST=1` is enabled.
+Container actions are not supported when using a Docker Socket Proxy unless you use the compose example with `tecnativa/docker-socket-proxy` and `POST=1` is enabled.
 :::
 

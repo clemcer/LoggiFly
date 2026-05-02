@@ -6,9 +6,11 @@ export default defineConfig({
   description: "LoggiFly Documentation",
   head: [['link', { rel: 'icon', href: '/LoggiFly/favicon.ico' }]],
   base: '/LoggiFly/',
-  cleanUrls: true,
+  cleanUrls: true,  
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
+
+    outline: [2, 4],
     search: {
       provider: 'local'
     },
@@ -24,6 +26,7 @@ export default defineConfig({
         items: [
           { text: 'What is LoggiFly', link: '/guide/what-is-loggifly' },
           { text: 'Getting Started', link: '/guide/getting-started' },
+          { text: 'Migrate to v2', link: '/guide/migrate-to-v2' },
         ]
       },
        {
@@ -39,17 +42,18 @@ export default defineConfig({
           { text: 'Configuration Walkthrough',
             collapsed: true,
             items: [
-              { text: 'Overview', link: '/guide/config_sections/' },
-              { text: 'Settings', link: '/guide/config_sections/settings' },
-              { text: 'Notifications', link: '/guide/config_sections/notifications' },
-              { text: 'Containers', link: '/guide/config_sections/containers' },
-              { text: 'Global Keywords', link: '/guide/config_sections/global-keywords' },
+              { text: 'Overview', link: '/guide/config/' },
+              { text: 'Settings', link: '/guide/config/settings' },
+              { text: 'Global', link: '/guide/config/global' },
+              { text: 'Notifications', link: '/guide/config/notifications' },
+              { text: 'Containers & Rules', link: '/guide/config/containers-and-rules' },
+              { text: 'Keywords & Triggers', link: '/guide/config/keywords-and-triggers' },
 
             ]
           },
-          { text: 'Configuration via Labels', link: '/guide/config_sections/label-config' },
-          { text: 'Settings Overview', link: '/guide/settings-overview' },
+          { text: 'Config Schema', link: '/guide/schema/' },
           { text: 'Environment Variables', link: '/guide/environment-variables' },
+          { text: 'Configuration via Labels', link: '/guide/config/label-config' },
         ]
       },
       {
@@ -58,7 +62,7 @@ export default defineConfig({
           { text: 'Customize Notifications',
             collapsed: true,
             items: [
-              { text: 'Available Fields', link: '/guide/customize-notifications/' },
+              { text: 'Overview', link: '/guide/customize-notifications/' },
               { text: 'Extract from JSON', link: '/guide/customize-notifications/json' },
               { text: 'Extract from Regex', link: '/guide/customize-notifications/regex' },
             ]
@@ -73,6 +77,7 @@ export default defineConfig({
         items: [
           { text: 'Examples', link: '/guide/examples' },
           { text: 'Tips & Troubleshooting', link: '/guide/tips' },
+          { text: 'Support the Project', link: '/support' },
         ]
       },
     ],

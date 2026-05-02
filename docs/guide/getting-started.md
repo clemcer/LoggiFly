@@ -8,7 +8,7 @@ The quickest way to get started is by configuring LoggiFly with environment vari
 
 
 The following section will provide a quick start with minimal configuration. 
-For more features and customization options, start [here](./config_sections/) to learn more about how to configure LoggiFly.
+For more features and customization options, start [here](./config/) to learn more about how to configure LoggiFly.
 
 ## Notification Services
 
@@ -23,7 +23,7 @@ The following docker compose examples presume that you are using a `config.yaml`
 
 ::: info
 Environment variables allow for a simple and much quicker setup but they don't support configuring different keywords per container or features like regex, container actions, message formatting and more.
-With a `config.yaml` file you do have access to all features and are able to apply settings on three different levels: globally, per container and per trigger, allowing for much more finegrained control.
+With a `config.yaml` file you have access to all features and can apply settings at multiple levels: globally, per log source, per rule and per trigger, allowing for much more fine-grained control.
 :::
 
 #### Environment Variables
@@ -34,24 +34,23 @@ Just edit and paste them into the `environment` section of your docker compose f
 ```yaml
     environment:
       # Choose at least one notification service
-      NTFY_URL: "https://ntfy.sh"       
-      NTFY_TOPIC: "your_topic"          
-      # ntfy Token or Username + Password In case you need authentication
+      NTFY_URL: "https://ntfy.sh"
+      NTFY_TOPIC: "your_topic"
+      # ntfy token or username + password for authentication
       NTFY_TOKEN: <token>
       NTFY_USERNAME: <username>
       NTFY_PASSWORD: <password>
-      APPRISE_URL: "discord://..."      # Apprise-compatible URL
-    
-      CONTAINERS: "vaultwarden,audiobookshelf"        # Comma-separated list
-      GLOBAL_KEYWORDS: "error,failed login,password"  # Basic keyword monitoring
-      GLOBAL_KEYWORDS_WITH_ATTACHMENT: "critical"     # Attaches a log file to the notification
+      APPRISE_URL: "discord://..."        # Apprise-compatible URL
+
+      CONTAINERS: "vaultwarden,audiobookshelf"   # comma-separated container names to monitor
+      GLOBAL_KEYWORDS: "error,failed login"  # keywords applied to all monitored containers
 ```
 :::
 
 #### config.yaml
 
 ::: info Tips
-- For all configuration options take a look at the [Configuration Walkthrough](./config_sections/). 
+- For all configuration options take a look at the [Configuration Walkthrough](./config/). 
 - You can also draw inspiration from this **[config example](./examples#)** with some real use cases.
 :::
 
@@ -83,6 +82,13 @@ If you don't want to use a socket proxy, maybe because you want to use the [cont
 
 :::
 
+## Strict Config Validation
 
+By default, unknown or misspelled field names in your `config.yaml` will cause LoggiFly to **refuse to start** with a validation error. This is to ensure no configuration of yours gets ignored without you noticing.
 
+If this bothers you, you can set `STRICT_CONFIG=false` in your compose file to ignore invalid fields (for the most part) and only log a warning:
 
+```yaml
+environment:
+  STRICT_CONFIG: "false"
+```

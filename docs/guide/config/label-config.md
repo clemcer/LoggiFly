@@ -5,19 +5,20 @@ title: Configuration via DockerLabels
 # Configuration via Docker Labels
 
 You can configure keywords and settings in the Docker labels of the containers you want to monitor.
+Pretty much every setting can be configured via Docker labels on rule and trigger level.
 
-Pretty much every setting can be configured via Docker labels on `container` and on `keyword` / `regex` level.
-
-Every label has to start with `loggifly` and you have to set `loggifly.monitor` to `true` for the container to be monitored. If you set it to `false` the container will always be ignored even it is configured in your `config.yaml`.
-
+Every label has to start with `loggifly` and you have to set `loggifly.monitor` to `true` for the container to be monitored. If you set it to `false` the container will always be ignored even it is configured in your `config.yaml`.<br>
 Container-level settings are set via `loggifly.<setting>`. 
 
-To provide a simple list of keywords, you can set `loggifly.keywords` to a comma-separated list of keywords. The same applies for `loggifly.excluded_keywords`.
+To provide a simple list of keywords, you can set `loggifly.keywords` to a comma-separated list of keywords. The same applies for `loggifly.ignore_keywords`.
 
 If you want to set keyword-level settings, you can do so by setting `loggifly.keywords.<index>.<setting>`. 
-So if you wanted to set a regex with a `title_template`, you can do so by setting `loggifly.keywords.1.regex: "some-regex"` and `loggifly.keywords.1.title_template: "some-title"`.
-
+So if you wanted to set a regex with a `title_template`, you can do so by setting `loggifly.keywords.1.regex: "some-regex"` and `loggifly.keywords.1.title_template: "some-title"`.<br>
 The same applies for container events. You can set `loggifly.container_events` to a comma-separated list of container events or add settings for a specific event by setting `loggifly.container_events.<index>.event: crash` and and`loggifly.container_events.<index>.<setting>: <some-value>`.
+
+::: info Merging of settings
+For the order in which settings defined via Docker labels are merged, see [Inheritance & Merging of Settings](../config/global#inheritance-merging-of-settings).
+:::
 
 ## Example
 
@@ -34,9 +35,9 @@ services:
       loggifly.ntfy_priority: "3"
       loggifly.attach_logfile: "true" # always attach the logfile to the notification for this container
 
-      # comma-separated lists for keywords and excluded keywords on container level
+      # comma-separated lists for keywords and ignore keywords on container level
       loggifly.keywords: "keyword1,keyword2,keyword3"
-      loggifly.excluded_keywords: "keyword4,keyword5,keyword6"
+      loggifly.ignore_keywords: "keyword4,keyword5,keyword6"
       
       # simple keyword with notification title
       loggifly.keywords.0: "critical" 
@@ -46,16 +47,16 @@ services:
       loggifly.keywords.1.regex: 'download.*failed' 
       loggifly.keywords.1.ntfy_tags: "partying_face"
       
-      # simple keyword with actions
+      # simple keyword with container_action
       loggifly.keywords.2.keyword: "timeout" 
-      loggifly.keywords.2.action: "restart"
+      loggifly.keywords.2.container_action: "restart"
 
       # comma-separated list of container events
       loggifly.container_events: "oom,die,destroy"
 
-      # container event with action and title_template
+      # container event with container_action and title_template
       loggifly.container_events.0.event: "crash"
-      loggifly.container_events.0.action: "restart"
+      loggifly.container_events.0.container_action: "restart"
       loggifly.container_events.0.title_template: "{container} crashed with exit code {exit_code}"
 
   ```

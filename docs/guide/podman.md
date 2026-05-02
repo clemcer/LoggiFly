@@ -57,7 +57,6 @@ Image=ghcr.io/clemcer/loggifly:latest
 AutoUpdate=registry # auto update of image, podman-auto-update.timer needs to run for it to work
 Environment=CONTAINERS="container1,container2"
 Environment=GLOBAL_KEYWORDS="error,failed login,password"
-Environment=GLOBAL_KEYWORDS_WITH_ATTACHMENT="critical"
 Environment=APPRISE_URL=<apprise url>
 Environment=DOCKER_HOST=unix:///run/user/1000/podman/podman.sock
 Volume=/path/to/config:/config

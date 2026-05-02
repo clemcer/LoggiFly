@@ -56,4 +56,4 @@ The original file is never modified.
 
 ## After conversion
 
-Review the output file before using it. Check the logs printed during conversion — warnings indicate fields that could not be migrated automatically and may require manual adjustment.
+Review the output file before using it. Check the logs printed during conversion. Warnings indicate fields that could not be migrated automatically and may require manual adjustment.
