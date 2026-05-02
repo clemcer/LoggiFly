@@ -1,0 +1,441 @@
+# =============================================================================
+#   LoggiFly v2 — Complete Configuration Reference
+# =============================================================================
+#
+# Every possible configuration option is shown here with explaining comments.
+# This file is for documentation purposes. Pick what you need.
+#
+# =============================================================================
+
+
+# Optional. Defaults to 2 if omitted. Must be the integer 2 if present.
+version: 2
+
+
+# =============================================================================
+# GLOBAL — Global defaults and keywords
+# =============================================================================
+#
+# global.defaults: holds all inheritable settings. The global baseline that
+# cascades down through sources, rules, and individual keywords.
+# global.keywords: keywords applied to ALL matched targets (both containers and swarm).
+#
+# Any setting defined here can be overridden at a more specific level.
+# See the docs for how settings are combined across levels.
+#
+# =============================================================================
+
+global:
+
+  # --- Global keywords --------------------------------------------------
+  # Applied to EVERY matched target across ALL sources (containers + swarm).
+  # Combined with source-level and rule-level keywords.
+  keywords:
+    - keyword: "critical"
+    - keyword: "out of memory"
+
+  defaults:
+
+    # --- Behavioral defaults ----------------------------------------------
+
+    # Minimum seconds between repeated triggers for the same keyword on the
+    # same target. 0 = no cooldown (default).
+    trigger_cooldown: 0
+
+    # Minimum seconds between repeated container actions on the same target.
+    # Default: 60. Minimum enforced: 10.
+    container_action_cooldown: 60
+
+    # Attach recent log lines as a file to the notification.
+    attach_logfile: false
+    attachment_lines: 20                # number of lines to include
+
+    # Hide the full regex pattern in the notification title.
+    # Useful for long/complex patterns.
+    hide_full_regex: false
+
+    # Regex patterns are case-sensitive by default.
+    regex_case_sensitive: true
+
+    # Suppress notifications from triggers (eg. keyword matches) entirely.
+    # Useful for action-only workflows where you don't need the notification.
+    disable_trigger_notifications: false
+
+    # When a single log line matches multiple keywords, send one notification
+    # per keyword match (false, default) or merge into one notification (true).
+    merge_matches: false
+
+    # Keywords/patterns that are always ignored at every level.
+    # Accepts plain strings, { keyword: ... }, and { regex: ... }.
+    # Combined with ignore_keywords from all other levels.
+    ignore_keywords:
+      - debug
+      - keyword: trace
+      - regex: ^\[HEALTH\]
+
+
+    # --- Templates --------------------------------------------------------
+    # Jinja2 syntax: {{ variable }}. Variable names listed in the docs:
+    # https://clemcer.github.io/loggifly/guide/customize-notifications/
+
+    title_template: "{{ container_name }}: {{ keywords }}"
+    message_template: |
+      Container: {{ container_name }}
+      Keywords:  {{ keywords }}
+      Time:      {{ datetime }}
+      Log:       {{ log_entry }}
+
+    # --- OliveTin integration ---------------------------------------------
+    olivetin_url: "http://olivetin:1337"
+    olivetin_username: "admin"
+    olivetin_password: "secret"
+
+    # --- Notification channel settings ------------------------------------
+    # Rarely set here since the notifications section already handles the global settings
+    # However, you can set these per rule or trigger as well to override the global settings
+    # ntfy_url:
+    # ntfy_topic:
+    # ntfy_priority:
+    # ntfy_tags:
+    # ntfy_token:
+    # ntfy_username:
+    # ntfy_password:
+    # ntfy_icon:
+    # ntfy_click:
+    # ntfy_markdown:
+    # ntfy_actions:
+    # ntfy_headers:
+    # apprise_url:
+    # webhook_url:
+    # webhook_headers:
+
+
+# =============================================================================
+# SETTINGS — Application settings (non-inheritable)
+# =============================================================================
+#
+# These settings are global only and cannot be overridden per rule or keyword.
+# =============================================================================
+
+settings:
+  log_level: INFO                     # DEBUG | INFO | WARNING | ERROR
+  multi_line_entries: true            # group multi-line log entries before matching
+  reload_config: true                 # auto-reload config.yaml on file changes
+  compact_summary_message: false      # format summary of monitored targets as comma-separated list instead of multi-line
+  
+  # System notifications (start, shutdown, config reload, monitor events).
+  # Set to false to suppress all of them, true to enable all (default),
+  # or use the sub-object form for per-event control.
+  system_notifications: true
+
+  # Per-event control (alternative to the boolean above):
+  # system_notifications:
+  #   start: true
+  #   shutdown: true
+  #   config_reload: true
+  #   monitor_event: true
+
+
+# =============================================================================
+# NOTIFICATIONS — Global notification credentials
+# =============================================================================
+#
+# Configure at least one notification service here.
+# These are the "base" credentials. Override per rule or keyword via the
+# ntfy_* / apprise_url / webhook_* fields in defaults: or at the rule level.
+# =============================================================================
+
+notifications:
+  ntfy:
+    url: "http://your-ntfy-server"    # required
+    topic: "loggifly"                 # required
+    token: "ntfy-token"               # authentication: token
+    username: "john"                  # authentication: username + password
+    password: "secret"
+    priority: 3
+    tags: "kite,mag"
+    icon: "https://example.com/icon.png"
+    click: "https://example.com"
+    markdown: false
+    actions:
+      - action: "view"
+        label: "View Logs"
+        url: "https://logs.example.com"
+        clear: true
+      - action: "http"
+        label: "Acknowledge"
+        url: "https://api.example.com/ack"
+        method: "POST"
+        headers:
+          Authorization: "Bearer token"
+        body: '{"acknowledged": true}'
+        clear: false
+      - action: "broadcast"             # Android only
+        label: "Broadcast"
+        intent: "io.heckel.ntfy.USER_ACTION"
+        extras:
+          key: "value"
+        clear: false
+    headers:
+      At: "tomorrow, 10am"
+
+  apprise:
+    url: "discord://webhook-id/token" # any Apprise-compatible URL
+
+  webhook:
+    url: "https://webhook.example.com/endpoint"
+    headers:
+      Authorization: "Bearer secret"
+      Content-Type: "application/json"
+
+
+# =============================================================================
+# CONTAINERS — Source config for Docker containers
+# =============================================================================
+#
+# containers: is a source configuration object
+# Per-container config lives inside containers.rules as a list of rule objects.
+# A container is monitored if it matches at least one rule.
+# =============================================================================
+
+containers:
+
+  # --- Source-level scope -----------------------------------------------
+  # Restrict the entire containers: block to specific Docker hosts.
+  # Glob patterns supported. Omit to apply to all hosts.
+  scope:
+    hosts: ["prod-host-*", "staging-host"]
+
+  # --- Never monitor ----------------------------------------------------
+  # Absolute exclusion list. Glob patterns supported.
+  never_monitor:
+    container_names: ["loggifly", "socket-proxy", "*-temp"]
+
+  # --- Source-level defaults --------------------------------------------
+  # Override global.defaults: for all container targets.
+  defaults:
+    trigger_cooldown: 10
+    attach_logfile: true
+    # ...
+
+  # --- Source-level keywords & events -----------------------------------
+  # Applied to EVERY matched container (combined with global and rule-level keywords).
+  keywords:
+    - keyword: "critical"
+    - keyword: "out of memory"
+  container_events:
+    - event: oom
+
+  # --- Rules ------------------------------------------------------------
+  # Each rule selects which containers to monitor and carries configuration
+  # (keywords, events, settings) that applies to all matched containers.
+  #
+  # A container is monitored if it matches at least one rule.
+  # If multiple rules match, their config is merged:
+  #   - See: https://clemcer.github.io/loggifly/guide/config/containers-and-rules#multi-rule-merging
+  # ==========================================================================
+
+  rules:
+
+    # -----------------------------------------------------------------------
+    # Shorthand syntax, equivalent to match.include.container_names: ["nginx"] (also supports glob)
+    # -----------------------------------------------------------------------
+    - container_name: nginx
+      keywords:
+        - error
+        - regex: "upstream.*failed"
+
+    # -----------------------------------------------------------------------
+    # Full match syntax with include and exclude
+    # Glob patterns supported in container_names.
+    # -----------------------------------------------------------------------
+    - id: web-services             # optional; auto-generated as rule-1, rule-2, ... if omitted
+      enabled: true                # set false to disable without removing the rule
+      match:
+        include:
+          container_names: ["web-*", "*-api", "app"]
+        exclude:
+          container_names: ["*-test", "*-staging"]
+      keywords:
+        - keyword: error
+          ntfy_priority: 4
+        - regex: "panic.*goroutine"
+          ntfy_priority: 5
+          attach_logfile: true
+      container_events:
+        - event: crash
+          container_action: restart
+          title_template: "{{ container_name }} crashed (exit {{ exit_code }})"
+
+    # -----------------------------------------------------------------------
+    # Rule scoped to specific hosts
+    # -----------------------------------------------------------------------
+    - id: db-on-dbhost
+      scope:
+        hosts: ["db-host*"]         # glob patterns also supported
+      match:
+        include:
+          container_names: ["*postgres*", "*mysql*"]
+      keywords:
+        - keyword: "deadlock"
+          trigger_cooldown: 0
+          ntfy_priority: 5
+
+    # -----------------------------------------------------------------------
+    # Wildcard glob rule, monitor all containers with this keyword
+    # -----------------------------------------------------------------------
+    - match:
+        include:
+          container_names: ["*"]
+        exclude:
+          container_names: ["loggifly", "socket-proxy"]
+      keywords:
+        - keyword: "fatal"
+
+    # -----------------------------------------------------------------------
+    # Per-keyword settings, every defaults field can be set per keyword
+    # -----------------------------------------------------------------------
+    - container_name: my-app
+      ntfy_topic: "my-app-alerts" # overrides ntfy_topic for this rule's targets
+      trigger_cooldown: 30
+      keywords:
+
+        # Simple keyword
+        - error
+
+        # keyword: form (same as plain string)
+        - keyword: critical
+
+        # Regex pattern
+        - regex: "process (?P<pid>\\d+) failed"
+          title_template: "Process {{ pid }} failed in {{ container_name }}"
+          message_template: "PID: {{ pid }}\nTime: {{ datetime }}\nLog: {{ log_entry }}"
+
+        # all_of group: triggers only when ALL members match in the same log entry
+        # Members can be plain strings, { keyword: ... }, or { regex: ... }
+        - all_of:
+            - authentication
+            - keyword: failed
+            - regex: "user.*not found"
+          ntfy_priority: 5
+          title_template: "Auth failure in {{ container_name }}"
+
+        # trigger_on: delay trigger until keyword matches N times within a time window
+        - keyword: "connection timeout"
+          trigger_on:
+            count: 5               # must be >= 2
+            timeframe: 60          # seconds, must be >= 1
+          title_template: "{{ trigger_on_count }} timeouts in {{ trigger_on_timeframe }}s"
+
+        # ignore_keywords per keyword: suppress this trigger if these patterns also match
+        - keyword: error
+          ignore_keywords:
+            - keyword: "expected error"
+            - regex: "known issue \\d+"
+
+        # merge_matches: merge this keyword's match with others (that have merge_matches enabled) from the same log line
+        - keyword: warning
+          merge_matches: true
+
+        # Container action: restart/stop/start the matched container on trigger
+        - regex: "process.*(failed|did not finish)"
+          container_action: restart
+          container_action_cooldown: 120
+
+        # Container action on another container (same Docker host only)
+        - keyword: "db unreachable"
+          container_action: restart@postgres
+
+        # Disable notification, only trigger action
+        - keyword: "service_down"
+          disable_trigger_notifications: true
+          container_action: restart
+
+        # OliveTin: trigger a single action
+        - keyword: "backup_failed"
+          olivetin_action_id: "run-backup"
+
+        # OliveTin: trigger multiple actions with arguments
+        - keyword: "backup_completed"
+          olivetin_actions:
+            - id: "notify-admin"
+              arguments:
+                - name: "severity"
+                  value: "info"
+            - id: "update-dashboard"
+              arguments:
+                - name: "status"
+                  value: "ok"
+
+      container_events:
+
+        # Monitor container lifecycle events
+        # Supported: start | stop | die | crash | destroy | healthy |
+        #            unhealthy | starting | oom | kill | create | restart
+        - event: crash
+          container_action: restart
+          container_action_cooldown: 60
+          ntfy_priority: 5
+          title_template: "{{ container_name }} crashed (exit {{ exit_code }})"
+          message_template: "{{ action_result_message }}"
+
+        - event: oom
+          attach_logfile: true
+          ntfy_priority: 5
+          ntfy_tags: "skull,warning"
+
+        - event: unhealthy
+          ntfy_priority: 4
+          title_template: "{{ container_name }} is unhealthy"
+
+
+# =============================================================================
+# SWARM — Source config for Docker Swarm services
+# =============================================================================
+#
+# Same structure as containers: with two differences:
+#   1. Rules use service_name / stack_name shorthands (or service_names /
+#      stack_names in match.include / match.exclude)
+#   2. container_action MUST include a container target: restart@container-name
+#      Bare actions (restart without @target) are not allowed since actions on swarm services are not supported:
+# =============================================================================
+
+swarm:
+
+  never_monitor:
+    service_names: ["*-debug", "*-canary"]
+    stack_names: ["dev-*"]
+
+  defaults:
+    trigger_cooldown: 30
+    title_template: "[{{ stack_name }}] {{ service_name }}: {{ keywords }}"
+
+  keywords:
+    - keyword: "critical"
+
+  rules:
+
+    # Shorthand: matches by service name
+    - service_name: my-service
+      keywords:
+        - keyword: timeout
+          trigger_on:
+            count: 3
+            timeframe: 30
+
+    # Shorthand: matches all services belonging to a stack
+    - stack_name: my-stack
+      keywords:
+        - keyword: error
+
+    # Full match syntax for swarm
+    - match:
+        include:
+          service_names: ["web-*"]
+          stack_names: ["prod-*"]
+        exclude:
+          service_names: ["*-staging"]
+      keywords:
+        - keyword: "fatal"
+          # Under swarm:, container_action MUST specify a target container
+          container_action: restart@sidecar-container

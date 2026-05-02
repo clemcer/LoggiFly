@@ -1,25 +1,48 @@
-containers:
-  container-name:  # Exact container name
-    keywords:
-      - error
-      - regex: (username|password).*incorrect 
-  another-container:
-    keywords:
-      - login
-    
-# Optional. These keywords are being monitored for all configured containers. 
-global_keywords:
-  keywords:
-    - failed
-    - critical
+# Minimal LoggiFly config. Edit and save to /config/config.yaml
+#
+# For all available options see:
+# https://clemcer.github.io/loggifly/guide/config/
 
-notifications:     
-  # Configure either ntfy or Apprise or both
+global:
+  # keywords here apply to every matched target
+  keywords:
+    - fatal
+    - keyword: panic
+      attach_logfile: true
+
+
+containers:
+  rules:
+    - container_name: my-container
+      keywords:
+        - error
+        - regex: "(username|password).*incorrect"
+
+    - container_name: "*-db" # matches any container whose name ends with "-db"
+      keywords:
+        - keyword: critical
+    
+    # You can also use the full matching syntax instead of the shorthands used above
+    - match:
+        include:
+          container_names:
+            - "webapp*"
+            - "nginx"
+        exclude:
+          container_names:
+            - "*-test"
+            - "tmp-*"
+      keywords:
+         - keyword: "timeout"
+
+
+notifications:
+  # Configure at least one notification service
   ntfy:
-    url: http://your-ntfy-server  
-    topic: loggifly                   
-    token: ntfy-token               # ntfy token in case you need authentication 
-    username: john                  # ntfy Username + Password in case you need authentication 
-    password: 1234                  # ntfy Username + Password in case you need authentication 
+    url: "http://your-ntfy-server"
+    topic: "loggifly"
+    token: "ntfy-token"           # token auth (or use username + password below) if needed
+    # username: john
+    # password: secret
   apprise:
-    url: "discord://webhook-url"    # Any Apprise-compatible URL (https://github.com/caronc/apprise/wiki)
+    url: "discord://webhook-url"  # any Apprise-compatible URL

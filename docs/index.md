@@ -18,8 +18,8 @@ hero:
       text: GitHub
       link: https://github.com/clemcer/loggifly
     - theme: alt
-      text: Buy me a Coffee
-      link: https://www.buymeacoffee.com/clemcer
+      text: Support the Project
+      link: /support
 
 features:
   - title: Plain Text, Regex & Multi-Line Log Detection

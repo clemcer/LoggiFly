@@ -4,68 +4,112 @@ title: Environment Variables
 
 # Environment Variables
 
-Except for container / keyword specific settings and regex patterns a lot of the settings can be configured via **Environment Variables**.
+While you can configure a lot of settings via **Environment Variables**, you can not create multiple rules or apply settings on different levels like you can do in the `config.yaml`.
 
+## Settings
 
-# General Settings
+Maps to the `settings:` section in the config.yaml.
 
-| Variables                         | Description                                              | Default  |
-|-----------------------------------|----------------------------------------------------------|----------|
-| `LOG_LEVEL`                     | Log Level for LoggiFly container logs.                    | INFO     |
-| `MULTI_LINE_ENTRIES`            | When enabled the program tries to catch log entries that span multiple lines.<br>If you encounter bugs or you simply don't need it you can disable it.| True     |
-| `RELOAD_CONFIG`               | When the config file is changed the program reloads the config | True  |
-| `DISABLE_NOTIFICATIONS`       | Disable notifications when keywords are found. Useful when you only want to trigger actions.                                  | False     |
-| `DISABLE_START_MESSAGE`          | Disable startup message.                                  | False     |
-| `DISABLE_SHUTDOWN_MESSAGE`       | Disable shutdown message.                                 | False     |
-| `DISABLE_CONFIG_RELOAD_MESSAGE`       | Disable message when the config file is reloaded.| False     |
-| `DISABLE_MONITOR_EVENT_MESSAGE`       | Disable message when the monitoring of a container stops or starts.| False     |
-| `COMPACT_SUMMARY_MESSAGE`       | Formats the summary message in startup and config reload notifications with a comma-separated list of containers instead of a multi-line list| False     |
+| Variable | Type | Default | Description | Maps to |
+|----------|------|---------|-------------|-------------|
+| `LOG_LEVEL` | `string` | `INFO` | Log verbosity level. One of `DEBUG`, `INFO`, `WARNING`, `ERROR`. | `settings.log_level` |
+| `MULTI_LINE_ENTRIES` | `bool` | `true` | Group multi-line log entries before keyword matching. LoggiFly automatically detects the log format. | `settings.multi_line_entries` |
+| `SYSTEM_NOTIFICATIONS_START` | `bool` | `true` | Whether to send a notification when LoggiFly starts. | `settings.system_notifications.start` |
+| `SYSTEM_NOTIFICATIONS_SHUTDOWN` | `bool` | `true` | Whether to send a notification when LoggiFly shuts down. | `settings.system_notifications.shutdown` |
+| `SYSTEM_NOTIFICATIONS_CONFIG_RELOAD` | `bool` | `true` | Whether to send a notification when the config file is reloaded. | `settings.system_notifications.config_reload` |
+| `SYSTEM_NOTIFICATIONS_MONITOR_EVENT` | `bool` | `true` | Whether to send a notification when a container starts or stops being monitored. | `settings.system_notifications.monitor_event` |
+| `SYSTEM_NOTIFICATIONS` | `bool` | `true` | Shortcut to enable or disable all system notifications. | `settings.system_notifications` |
+| `COMPACT_SUMMARY_MESSAGE` | `bool` | `false` | Send a shorter summary notification instead of a full message. | `settings.compact_summary_message` |
+| `RELOAD_CONFIG` | `bool` | `true` | Automatically reload configuration when the config file changes. | `settings.reload_config` |
+
+## Global Keywords
+
+Maps to the `global.keywords:` section in the config.yaml.
+
+| Variable | Type | Default | Description | Maps to |
+|----------|------|---------|-------------|-------------|
+| `GLOBAL_KEYWORDS` | `string (comma-separated)` | `–` | Keywords to watch for across all monitored containers. | `global.keywords` |
+
+## Global Defaults 
+
+Maps to the `global.defaults:` section in the config.yaml.
+
+| Variable | Type | Default | Description | Maps to |
+|----------|------|---------|-------------|-------------|
+| `IGNORE_KEYWORDS` | `string (comma-separated)` | `–` | Keywords to suppress. Matching log lines will not trigger notifications (or anything else like actions). | `global.defaults.ignore_keywords` |
+| `TITLE_TEMPLATE` | `string` | `–` | [Template](./customize-notifications/#template-fields-reference) for the notification title. Use <code v-pre>{{ variable }}</code> placeholders (e.g. <code v-pre>{{ container_name }}</code>, <code v-pre>{{ keyword }}</code>). | `global.defaults.title_template` |
+| `MESSAGE_TEMPLATE` | `string` | `–` | [Template](./customize-notifications/#template-fields-reference) for the notification message body. Use <code v-pre>{{ variable }}</code> placeholders (e.g.<code v-pre>{{ log_entry }}</code>, <code v-pre>{{ keyword }}</code>). | `global.defaults.message_template` |
+| `OLIVETIN_URL` | `string` | `–` | Base URL of the OliveTin instance to trigger actions on. | `global.defaults.olivetin_url` |
+| `OLIVETIN_USERNAME` | `string` | `–` | Username for OliveTin authentication. | `global.defaults.olivetin_username` |
+| `OLIVETIN_PASSWORD` | `string` | `–` | Password for OliveTin authentication. | `global.defaults.olivetin_password` |
+| `ATTACH_LOGFILE` | `bool` | `false` | Attach recent log lines as a file to the notification. | `defaults.attach_logfile` |
+| `TRIGGER_COOLDOWN` | `int` | `0` | Minimum seconds between repeated triggers for the same keyword on the same target. `0` disables cooldown. | `global.defaults.trigger_cooldown` |
+| `CONTAINER_ACTION_COOLDOWN` | `int` | `60` | Minimum seconds between repeated container actions (restart/stop) on the same target. | `global.defaults.container_action_cooldown` |
+| `ATTACHMENT_LINES` | `int` | `20` | Number of log lines to include in the log attachment. | `global.defaults.attachment_lines` |
+| `HIDE_FULL_REGEX` | `bool` | `false` | In notifications, hide the full regex match and only show named capturing groups. | `global.defaults.hide_full_regex` |
+| `REGEX_CASE_SENSITIVE` | `bool` | `true` | Whether regex patterns are case-sensitive. | `global.defaults.regex_case_sensitive` |
+| `DISABLE_TRIGGER_NOTIFICATIONS` | `bool` | `false` | Suppress all notifications. Useful when only container actions or OliveTin actions are needed. | `global.defaults.disable_trigger_notifications` |
+| `MERGE_MATCHES` | `bool` | `false` | Combine multiple keyword matches from the same log entry into a single notification. | `global.defaults.merge_matches` |
 
 ## Notifications
 
-| Variables                         | Description                                              | Default  |
-|-----------------------------------|----------------------------------------------------------|----------|
-| `NTFY_URL`                      | URL of your ntfy server instance                           | _N/A_    |
-| `NTFY_TOKEN`                    | Authentication token for ntfy in case you need authentication.      | _N/A_    |
-| `NTFY_USERNAME`                 | ntfy Username to use with the password in case you need authentication.             | _N/A_    |
-| `NTFY_PASSWORD`                 | ntfy password to use with the username in case you need authentication.             | _N/A_    |
-| `NTFY_TOPIC`                    | Notification topic for ntfy.                               | _N/A_  |
-| `NTFY_TAGS`                     | [Tags/Emojis](https://docs.ntfy.sh/emojis/) for ntfy notifications. | kite,mag  |
-| `NTFY_PRIORITY`                 | Notification [priority](https://docs.ntfy.sh/publish/?h=priori#message-priority) for ntfy messages.                 | 3 / default |
-| `NTFY_ICON`                     | [Icon URL](https://docs.ntfy.sh/publish/?h=icon#icons) to display with the notification (defaults to LoggiFly logo) | _N/A_    |
-| `NTFY_CLICK`                     | [URL to open](https://docs.ntfy.sh/publish/?h=click#click-action) when the notification is clicked | _N/A_    |
-| `NTFY_MARKDOWN`                     | Enable [markdown formatting](https://docs.ntfy.sh/publish/?h=markdo#markdown-formatting) in message (true/false), defaults to false | False    |
-| `APPRISE_URL`                   | Any [Apprise-compatible URL](https://github.com/caronc/apprise/wiki)  | _N/A_    |
-| `WEBHOOK_URL`                   | URL of your custom webhook. | _N/A_    |
+Maps to the `notifications:` section in the config.yaml.
 
-# Monitoring
-
-| Variables                         | Description                                              | Default  |
-|-----------------------------------|----------------------------------------------------------|----------|
-| `LOGGIFLY_MODE`              | Set this variable to `swarm` when wanting to use LoggiFly in swarm mode | _N/A_     |
-| `CONTAINERS`                    | A comma separated list of containers. These are added to the containers from the `config.yaml` (if you are using one).| _N/A_     |
-| `SWARM_SERVICES`              |  A comma separated list of docker swarm services to monitor. | _N/A_     |
-| `GLOBAL_KEYWORDS`       | Keywords that will be monitored for all containers. Overrides `global_keywords.keywords` from the `config.yaml`.| _N/A_     |
-| `GLOBAL_KEYWORDS_WITH_ATTACHMENT`| Notifications triggered by these global keywords have a logfile attached. | _N/A_     |
-| `MONITOR_ALL_CONTAINERS`      | Monitor all containers. | False     |
-| `MONITOR_ALL_SWARM_SERVICES`  | Monitor all swarm services. | False     |
-| `EXCLUDED_CONTAINERS`         | A comma separated list of containers that should not be monitored. To be used with `MONITOR_ALL_CONTAINERS` | _N/A_     |
-| `EXCLUDED_SWARM_SERVICES`     | A comma separated list of swarm services that should not be monitored. To be used with `MONITOR_ALL_SWARM_SERVICES` | _N/A_     |
+| Variable | Type | Default | Description | Maps to |
+|----------|------|---------|-------------|-------------|
+| `NTFY_TAGS` | `string` | `–` | Comma-separated Ntfy tags or emoji shortcodes to include in the notification header. | `notifications.ntfy.tags` |
+| `NTFY_TOPIC` | `string` | `–` | Ntfy topic to publish notifications to. | `notifications.ntfy.topic` |
+| `NTFY_PRIORITY` | `string` / `int` | `–` | Notification priority. One of `min`, `low`, `default`, `high`, `max` (or 1–5). | `notifications.ntfy.priority` |
+| `NTFY_URL` | `string` | `–` | Base URL of the Ntfy server (e.g. `https://ntfy.sh`). | `notifications.ntfy.url` |
+| `NTFY_TOKEN` | `string` | `–` | Authentication token for Ntfy. | `notifications.ntfy.token` |
+| `NTFY_USERNAME` | `string` | `–` | Username for Ntfy basic authentication. | `notifications.ntfy.username` |
+| `NTFY_PASSWORD` | `string` | `–` | Password for Ntfy basic authentication. | `notifications.ntfy.password` |
+| `NTFY_ICON` | `string` | `–` | URL of an icon to display with the notification. | `notifications.ntfy.icon` |
+| `NTFY_CLICK` | `string` | `–` | URL to open when the notification is clicked. | `notifications.ntfy.click` |
+| `NTFY_MARKDOWN` | `bool` | `–` | Render the notification body as Markdown. | `notifications.ntfy.markdown` |
+| `APPRISE_URL` | `string` | `–` | Apprise-compatible notification URL (supports 100+ services). | `notifications.apprise.url` |
+| `WEBHOOK_URL` | `string` | `–` | HTTP endpoint to POST notification payloads to. | `notifications.webhook.url` |
 
 
-# Other Settings
+## Containers
 
-| Variables                         | Description                                              | Default  |
-|-----------------------------------|----------------------------------------------------------|----------|
-| `EXCLUDED_KEYWORDS`       | Keywords that will always be ignored. Can be used to suppress notifications from irrelevant log lines | _N/A_     |
-| `ATTACH_LOGFILE`                | Attach a Logfile to *all* notifications. | True    |
-| `ATTACHMENT_LINES`              | Define the number of Log Lines in the attachment file     | 20     |
-| `NOTIFICATION_COOLDOWN`         | Cooldown period (in seconds) per container per keyword before a new message can be sent  | 5        | 
-| `ACTION_COOLDOWN`         | Cooldown period (in seconds) before the next container action can be performed. Always at least 10s. (`action_keywords` are only configurable in YAML)  | 300        |
-| `TITLE_TEMPLATE`         | Template for the notification title (see [customize-notifications](./customize-notifications/)) | _N/A_        |
-| `MESSAGE_TEMPLATE`         | Template for the notification message (see [customize-notifications](./customize-notifications/)) | _N/A_        |
-| `HIDE_REGEX_IN_TITLE`         | Exclude regex from the found keywords in the notification title for a cleaner look. Useful when using very long regexes.| False     |
-| `REGEX_CASE_SENSITIVE`         | Case sensitive regex matching. | False     |
-| `OLIVETIN_URL`         | URL of your OliveTin instance. | _N/A_        |
-| `OLIVETIN_USERNAME`         | Username for your OliveTin instance. | _N/A_        |
-| `OLIVETIN_PASSWORD`         | Password for your OliveTin instance. | _N/A_        |
+Shortcuts to configure container monitoring without a config file. Maps into the `containers:` section.
+
+| Variable | Type | Default | Description | Maps to |
+|----------|------|---------|-------------|-------------|
+| `CONTAINERS` | `string (comma-separated)` | `–` | Container names to monitor with default keyword settings. | `containers.rules.0.match.include.container_names` |
+| `CONTAINERS_KEYWORDS` | `string (comma-separated)` | `–` | Keywords to watch for across all monitored containers. | `containers.keywords` |
+| `CONTAINERS_CONTAINER_EVENTS` | `string (comma-separated)` | `–` | Docker container events to monitor (e.g. `start,stop,die`). | `containers.container_events` |
+| `CONTAINERS_SCOPE_HOSTS` | `string (comma-separated)` | `–` | Docker hosts to restrict container monitoring to. | `containers.scope.hosts` |
+| `CONTAINERS_NEVER_MONITOR` | `string (comma-separated)` | `–` | Container names to never monitor. | `containers.never_monitor.container_names` |
+
+## Swarm
+
+Shortcuts to configure Docker Swarm service monitoring without a config file. Maps into the `swarm:` section.
+
+| Variable | Type | Default | Description | Maps to |
+|----------|------|---------|-------------|-------------| 
+| `SWARM_SERVICES` | `string (comma-separated)` | `–` | Swarm service names to monitor with default keyword settings. | `swarm.rules.0.match.include.service_names` |
+| `SWARM_STACKS` | `string (comma-separated)` | `–` | Swarm stack names to monitor with default keyword settings. | `swarm.rules.1.match.include.stack_names` |
+| `SWARM_KEYWORDS` | `string (comma-separated)` | `–` | Keywords to watch for across all monitored Swarm services. | `swarm.keywords` |
+| `SWARM_CONTAINER_EVENTS` | `string (comma-separated)` | `–` | Docker events to monitor for Swarm services. | `swarm.container_events` |
+| `SWARM_SCOPE_HOSTS` | `string (comma-separated)` | `–` | Docker hosts to restrict Swarm monitoring to. | `swarm.scope.hosts` |
+| `SWARM_SERVICES_NEVER_MONITOR` | `string (comma-separated)` | `–` | Swarm service names to never monitor. | `swarm.never_monitor.service_names` |
+| `SWARM_STACKS_NEVER_MONITOR` | `string (comma-separated)` | `–` | Swarm stack names to never monitor. | `swarm.never_monitor.stack_names` |
+
+## Advanced
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CONFIG_PATH` | `string` | `/config/config.yaml` | Path to the YAML config file inside the container. |
+| `DOCKER_HOST` | `string` | `–` | Docker socket or TCP address to connect to (e.g. `tcp://remote-host:2375`). Defaults to the local socket. |
+| `LOGGIFLY_MODE` | `string` | `–` | Set to `swarm` to get additional context in notifications about which node the container that has triggered a notification is running on. |
+| `STRICT_CONFIG` | `bool` | `true` | Make unknown config fields raise an error instead of a warning. |
+| `DEBUG_TARGET_CONFIG` | `bool` | `false` | Enable detailed logging showing the effective target config for each target (debug logging needs to be enabled) |
+| `ENABLE_HEALTHCHECK` | `bool` | `false` | Enable the file-based healthcheck heartbeat. |
+| `HEARTBEAT_PATH` | `string` | `/dev/shm/loggifly-heartbeat` | Path to the heartbeat file written by the healthcheck mechanism. |
+| `HEARTBEAT_INTERVAL` | `int` | `60` | Interval in seconds between heartbeat file writes. |
+| `MAX_TRIGGER_WORKERS` | `int` | `8` | Maximum number of concurrent worker threads for processing triggers. |
+| `CLEANUP_THRESHOLD_HOURS_CONFIGURED` | `int` | `168` | Hours of inactivity before a configured but stale container monitor is cleaned up. |
+| `CLEANUP_THRESHOLD_HOURS_UNCONFIGURED` | `int` | `24` | Hours of inactivity before an unconfigured container monitor is cleaned up. |
+| `CLEANUP_INTERVAL_MINUTES` | `int` | `60` | How often (in minutes) the stale monitor cleanup task runs. |

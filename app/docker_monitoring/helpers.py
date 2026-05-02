@@ -1,4 +1,3 @@
-from config.config_model import GlobalConfig
 from dataclasses import dataclass
 import os
 import re
@@ -11,6 +10,7 @@ from docker.client import DockerClient
 import docker.errors
 import socket
 from constants import Actions
+from utils import get_env_var
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,14 @@ class ContainerSnapshot:
         return self.service_name is not None
 
     @property
-    def unit_name(self) -> str:
+    def target_name(self) -> str:
         """
-        Compute the unit name for this container.
+        Compute the target name for this container.
         For swarm services, includes replica number (e.g., "service.1").
         For regular containers, returns the container name.
         """
         if self.is_swarm_service:
-            return get_service_unit_name(self.labels) or self.name
+            return get_service_target_name(self.labels) or self.name
         return self.name
 
     @classmethod
@@ -82,13 +82,16 @@ class ContainerActionResult:
     action_target: str # e.g. "container_name"
     is_on_cooldown: bool = False
 
+
 class ContainerActionError(Exception):
     """Base exception for container action failures"""
     pass
 
+
 class ContainerValidationError(ContainerActionError):
     """Container state is invalid for the requested action"""
     pass
+
 
 def format_docker_error(error: Exception) -> str:
     """
@@ -106,6 +109,7 @@ def format_docker_error(error: Exception) -> str:
     if "timeout" in error_str.lower():
         return "Operation timed out"
     return "See logs for details."
+
 
 def cleanup_stale_action_cooldowns(
     action_cooldowns: dict,
@@ -240,32 +244,6 @@ def container_action(container: Container, action: str, logger: logging.Logger) 
         raise ContainerActionError(f"Failed to {action} {container_name}. {error_detail}")
 
 
-def get_configured(config: GlobalConfig, hostname: str) -> tuple[list[str], list[str]]:
-    selected_containers = []
-    selected_swarm_services = []
-    host_config = config.hosts.get(hostname) if isinstance(config.hosts, dict) and hostname else None
-    containers = dict(config.containers or {})
-    if host_config:
-        containers.update(host_config.containers or {})    
-    swarm_services = config.swarm_services or {}
-    
-    configs_to_check = [
-        (containers, selected_containers),
-        (swarm_services, selected_swarm_services),
-    ]
-    for (config_of_units, selected) in configs_to_check:
-        if not config_of_units:
-            continue
-        for unit_name in config_of_units:
-            config_object = config_of_units[unit_name]
-            if hostname and config_object.hosts is not None:
-                hostnames = config_object.hosts.split(",")
-                if all(hn.strip() != hostname for hn in hostnames):
-                    continue
-            selected.append(unit_name)
-    return selected_containers, selected_swarm_services
-
-
 def get_service_info(container, client) -> tuple[str, str, dict] | None:
     """Get Docker Swarm service information from a container."""
     container_labels = container.labels
@@ -281,7 +259,7 @@ def get_service_info(container, client) -> tuple[str, str, dict] | None:
         return service_name, stack_name, {}
 
 
-def get_service_unit_name(labels) -> str | None:
+def get_service_target_name(labels) -> str | None:
     """
     Extract the service name with their replica id from container labels so that we have a unique name for each replica.
     Converts service_name.1.1234567890 to service_name.1
@@ -299,8 +277,7 @@ def get_service_unit_name(labels) -> str | None:
     if match:
         return f"{service_name}.{match.group(1)}"
     else:
-        return service_name or stack_name
-
+        return service_name
 
 def parse_label_config(labels: dict) -> dict[str, Any]:
     """Parse LoggiFly configuration from Docker labels."""
@@ -320,8 +297,8 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
             # Simple comma-separated keyword list
             if parts[0] == "keywords" and isinstance(value, str):
                 keywords_to_append = [kw.strip() for kw in value.split(",") if kw.strip()]
-            elif parts[0] == "excluded_keywords" and isinstance(value, str):
-                config["excluded_keywords"] = [kw.strip() for kw in value.split(",") if kw.strip()]
+            elif parts[0] == "ignore_keywords" and isinstance(value, str):
+                config["ignore_keywords"] = [kw.strip() for kw in value.split(",") if kw.strip()]
             elif parts[0] == "container_events" and isinstance(value, str):
                 container_events_to_append = [event.strip() for event in value.split(",") if event.strip()]
             # Top Level Fields (e.g. ntfy_topic, attach_logfile, etc.)
@@ -338,9 +315,9 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
                 field = parts[2]
                 if index not in keywords_by_index:
                     keywords_by_index[index] = {}
-                if field == "keyword_group":
+                if field == "all_of":
                     keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
-                elif field == "excluded_keywords":
+                elif field == "ignore_keywords":
                     keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
                 else:
                     keywords_by_index[index][field] = value
@@ -390,4 +367,4 @@ def parse_event_type(event: dict) -> str | None:
     return action
 
 def swarm_mode_enabled() -> bool:
-    return os.getenv("LOGGIFLY_MODE", "").strip().lower() == "swarm"
+    return str(get_env_var("LOGGIFLY_MODE", fallback_value="")).strip().lower() == "swarm"

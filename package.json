@@ -3,7 +3,9 @@
     "vitepress": "^1.6.3"
   },
   "scripts": {
+    "predocs:dev": "python3 scripts/export_schema.py",
     "docs:dev": "vitepress dev docs --host",
+    "predocs:build": "python3 scripts/export_schema.py",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"
   },

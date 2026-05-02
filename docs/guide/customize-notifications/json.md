@@ -39,27 +39,33 @@ You can use `message_template` to extract fields from the json log entry:
 
 ```yaml
 containers:
-  authelia:
-    keywords:
-      - keyword: Unsuccessful 1FA authentication
-        title_template: "Failed login from {remote_ip}"
-        message_template: |
-          🚨 Failed Login Attempt:
-          {msg}
-          🔎 IP: {remote_ip}
-          🕐 {time}
+  rules:
+    - container_name: authelia
+      keywords:
+        - keyword: Unsuccessful 1FA authentication
+          title_template: "Failed login from {{ remote_ip }}"
+          message_template: |
+            🚨 Failed Login Attempt:
+            {{ msg }}
+            🔎 IP: {{ remote_ip }}
+            🕐 {{ time }}
 ```
 
 
 ## Nested JSON Structures
 
-You can also extract data from nested json structures, including dictionaries and lists:
+You can also extract data from nested JSON structures, including dictionaries and lists:
 
-- {key} for top-level fields
-- {dict[key]} for nested fields
-- {list[index][key]} for list access (with indices starting at 0)
+- <code v-pre>{{ key }}</code> for top-level fields
+- <code v-pre>{{ dict['key'] }}</code> or <code v-pre>{{ dict.key }}</code>for nested fields
+- <code v-pre>{{ list[0]['key'] }}</code> for list access (indices starting at 0)
 
-Example json log entry:
+::: info
+Dot notation (<code v-pre>{{ dict.key }}</code>) only works for keys that are valid Python identifiers, so alphanumeric and underscores only. Use bracket notation for keys with hyphens, spaces, dots, or other special characters.<br>
+For example, use <code v-pre>{{ dict['key-with-hyphen'] }}</code> as <code v-pre>{{ dict.key-with-hyphen }}</code> would not work.
+:::
+
+Example JSON log entry:
 
 ```json
 {
@@ -76,19 +82,19 @@ Example json log entry:
     "country": "Germany"
   }
 }
-
 ```
 
 Example template:
 
 ```yaml
 containers:
-  myapp:
-    keywords:
-      - keyword: "login"
-        message_template: |
-          User {user[name]} logged in from {location[city]}
-          Role: {user[roles][0][name]}
+  rules:
+    - container_name: myapp
+      keywords:
+        - keyword: "login"
+          message_template: |
+            User {{ user['name'] }} logged in from {{ location['city'] }}
+            Role: {{ user['roles'][0]['name'] }}
 ```
 
 Output:
@@ -97,4 +103,3 @@ Output:
 User admin logged in from Berlin
 Role: superuser
 ```
-

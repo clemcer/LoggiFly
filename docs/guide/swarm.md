@@ -14,7 +14,6 @@ The `config.yaml` can be passed to each worker via [Docker Configs](https://docs
 
 The configuration stays the same except that you set `swarm_services` instead of `containers` or use the `SWARM_SERVICES` environment variable instead of `CONTAINERS`.
 
-If normal `containers` are set instead of or additionally to `swarm_services` LoggiFly will also look for these containers on every node.
 
 ## Docker Compose
 
@@ -37,8 +36,8 @@ services:
       LOGGIFLY_MODE: swarm
       # You can use environment variables instead of a config.yaml if you want
       # SWARM_SERVICES: nginx,redis
+      # SWARM_STACKS: my_stack1,my_stack2
       # GLOBAL_KEYWORDS: keyword1,keyword2
-      # GLOBAL_KEYWORDS_WITH_ATTACHMENT: keyword3
       # For more environment variables see the environment variables section in the docs 
 # Comment out the rest of this file if you are only using environment variables
     configs:
@@ -57,25 +56,29 @@ configs:
 In the `config.yaml`, you can configure Swarm services to be monitored in the same way as containers.
 
 ```yaml
-swarm_services:
-  nginx:
-    keywords:
-      - error
-      - regex: \timeout\b.* 
-  redis:
-    - keyword: critical
-      attach_logfile: true
+swarm:
+  rules:
+    - service_name: nginx
+      keywords:
+        - error
+        - regex: \timeout\b.*
+
+    # you can also use the full match syntax
+    - match:
+        include:
+          service_names: ["redis"]
+      keywords:
+        - keyword: critical
+        - attach_logfile: true
+
+    # or select a whole stack and use glob patterns
+    - stack_name: my_stack*
+      keywords:
+        - keyword: critical
+        - regex: \timeout\b.*
 ```
 
-If both nginx and redis are part of the same compose stack named `my_service` you can configure that service name to monitor both:
-```yaml
-swarm_services:
-  my_service: # includes my_service_nginx and my_service_redis
-    keywords:
-      - error
-      - regex: \timeout\b.* 
-```
-
-The `swarm_services` configuration is identical to that of `containers`, so for all available configuration options, refer to the [Containers section](./config_sections/containers) or the [Settings Overview](./settings-overview). 
-
+::: tip
+Except for the matching syntax, the rule configuration options for `swarm_services` are identical to that of `containers`, so for all available configuration options, refer to the [Containers & Rules](./config/containers-and-rules) section. You can also refer to the [Config Reference](./config/index.md#full-config-example) for a full `config.yaml` reference or the [Config Schema](./schema/) for the dynamically generated schema reference of the whole config.
+:::
 

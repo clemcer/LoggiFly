@@ -7,6 +7,14 @@ class MonitorType(Enum):
     CONTAINER = "container"
     SWARM = "swarm"
 
+# NTFY_PREFIX = "ntfy_"
+# APPRISE_PREFIX = "apprise_"
+# WEBHOOK_PREFIX = "webhook_"
+
+class NotificationPrefix(Enum):
+    NTFY = "ntfy_"
+    APPRISE = "apprise_"
+    WEBHOOK = "webhook_"
 
 # Log Pattern Constants
 # These patterns are used to detect the start of new log entries in multi-line mode.
@@ -103,31 +111,31 @@ SUPPORTED_CONTAINER_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
 
 
 MAP_EVENT_TO_TITLE = {
-    "start":    "Container '{target_name}' started",
-    "stop":     "Container '{target_name}' stopped",
-    "die":      "Container '{target_name}' exited",
-    "crash":    "Container '{target_name}' crashed",
-    "destroy":  "Container '{target_name}' removed",
-    "healthy":  "Container '{target_name}' is healthy",
-    "unhealthy":"Container '{target_name}' is unhealthy",
-    "starting": "Container '{target_name}' is starting",
-    "oom":      "OOM event for container '{target_name}'",
-    "kill":     "Container '{target_name}' was killed",
-    "create":   "Container '{target_name}' was created",
-    "restart":  "Container '{target_name}' was restarted",
+    "start":    "Container '{{ target_name }}' started",
+    "stop":     "Container '{{ target_name }}' stopped",
+    "die":      "Container '{{ target_name }}' exited",
+    "crash":    "Container '{{ target_name }}' crashed",
+    "destroy":  "Container '{{ target_name }}' removed",
+    "healthy":  "Container '{{ target_name }}' is healthy",
+    "unhealthy":"Container '{{ target_name }}' is unhealthy",
+    "starting": "Container '{{ target_name }}' is starting",
+    "oom":      "OOM event for container '{{ target_name }}'",
+    "kill":     "Container '{{ target_name }}' was killed",
+    "create":   "Container '{{ target_name }}' was created",
+    "restart":  "Container '{{ target_name }}' was restarted",
 }
 
 MAP_EVENT_TO_MESSAGE = {
-    "start":     "Container '{target_name}' was started.",
-    "stop":      "Container '{target_name}' was stopped by a stop request.",
-    "die":       "Container '{target_name}' exited. Exit code: {exit_code}.",
-    "crash":     "Container '{target_name}' exited unexpectedly. Exit code: {exit_code}.",
-    "destroy":   "Container '{target_name}' was removed.",
-    "healthy":   "Health status for container '{target_name}' changed to healthy.",
-    "unhealthy": "Health status for container '{target_name}' changed to unhealthy.",
-    "starting":  "Health status for container '{target_name}' changed to starting.",
-    "oom":       "Container '{target_name}' ran out of memory (OOM).",
-    "kill":      "Container '{target_name}' was killed (signal: {signal}).",
-    "create":    "Container '{target_name}' was created.",
-    "restart":   "Container '{target_name}' was restarted.",
+    "start":     "Container '{{ target_name }}' was started.",
+    "stop":      "Container '{{ target_name }}' was stopped by a stop request.",
+    "die":       "Container '{{ target_name }}' exited. Exit code: {{ exit_code }}.",
+    "crash":     "Container '{{ target_name }}' exited unexpectedly. Exit code: {{ exit_code }}.",
+    "destroy":   "Container '{{ target_name }}' was removed.",
+    "healthy":   "Health status for container '{{ target_name }}' changed to healthy.",
+    "unhealthy": "Health status for container '{{ target_name }}' changed to unhealthy.",
+    "starting":  "Health status for container '{{ target_name }}' changed to starting.",
+    "oom":       "Container '{{ target_name }}' ran out of memory (OOM).",
+    "kill":      "Container '{{ target_name }}' was killed (signal: {{ signal }}).",
+    "create":    "Container '{{ target_name }}' was created.",
+    "restart":   "Container '{{ target_name }}' was restarted.",
 }

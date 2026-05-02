@@ -8,7 +8,7 @@ from pydantic import (
 )
 from typing import Literal
 from enum import Enum
-from constants import SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_CONTAINER_EVENTS
+from constants import SUPPORTED_CONTAINER_ACTIONS, SUPPORTED_CONTAINER_EVENTS # type: ignore
 from typing import List, Optional, Union, ClassVar, Annotated, Any
 import logging
 import re
@@ -242,20 +242,20 @@ class KeywordBase(BaseModel):
                     keys = list(item.keys())
                     # Validate required keys
                     if "keyword" not in item and "regex" not in item and "keyword_group" not in item:
-                        logging.warning(f"Ignoring Error in config in field {get_kw_or_rgx(item)}: You have to set 'keyword', 'regex' or 'keyword_group' as a key.")
+                        logging.warning(f"Ignoring invalid field in config {get_kw_or_rgx(item)}: You have to set 'keyword', 'regex' or 'keyword_group' as a key.")
                         continue
                     elif "keyword_group" in item and not isinstance(item["keyword_group"], list):
-                        logging.warning(f"Ignoring Error in config in field {get_kw_or_rgx(item)}: You have to set 'keyword_group' as a list.")
+                        logging.warning(f"Ignoring invalid field in config {get_kw_or_rgx(item)}: You have to set 'keyword_group' as a list.")
                         continue
                     elif "regex" in item and not validate_regex(item["regex"]):
-                        logging.warning(f"Ignoring Error in config in field {get_kw_or_rgx(item)}: Invalid regex.")
+                        logging.warning(f"Ignoring invalid field in config {get_kw_or_rgx(item)}: Invalid regex.")
                         continue
                     # Validate and convert fields
                     for key in keys:
                         if key == "action":
                             valid, error = is_valid_container_action(item["action"], disallow_self_action=cls._DISALLOW_SELF_CONTAINER_ACTION)
                             if not valid:
-                                logging.warning(f"Error in config in field {get_kw_or_rgx(item)}: Invalid action: {error}")
+                                logging.warning(f"Ignoring invalid field in config {get_kw_or_rgx(item)}: Invalid action: {error}")
                                 item["action"] = None
                         if isinstance(item[key], int):
                             item[key] = str(item[key])
@@ -299,29 +299,29 @@ class ContainerEventBase(BaseConfigModel):
             for item in data["container_events"]:
                 if isinstance(item, str):
                     if item.strip() not in SUPPORTED_CONTAINER_EVENTS:
-                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
+                        logging.warning(f"Ignoring invalid field in config 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                         continue
                     converted.append({
                         "event": item.strip(),
                     })
                 elif isinstance(item, dict):
                     if not item.get("event"):
-                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
+                        logging.warning(f"Ignoring invalid field in config 'container_events': '{item}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                         continue
                     if item["event"] not in SUPPORTED_CONTAINER_EVENTS:
-                        logging.warning(f"Ignoring Error in config in field 'container_events': '{item['event']}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
+                        logging.warning(f"Ignoring invalid field in config 'container_events': '{item['event']}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                         continue
                     for key in item.keys():
                         if key == "action":
                             valid, error = is_valid_container_action(item["action"], disallow_self_action=cls._DISALLOW_SELF_CONTAINER_ACTION)
                             if not valid:
-                                logging.warning(f"Error in config in field 'container_events': Invalid action ('{item['action']}') for event '{item['event']}': {error}")
+                                logging.warning(f"Ignoring invalid field in config 'container_events': Invalid action ('{item['action']}') for event '{item['event']}': {error}")
                                 item["action"] = None
                         if isinstance(item[key], int):
                             item[key] = str(item[key])
                     converted.append(item)
                 else:
-                    logging.warning(f"Ignoring Error in config in field 'container_events': '{item}' is not a string or dict.")
+                    logging.warning(f"Ignoring invalid field in config 'container_events': '{item}' is not a string or dict.")
                     continue
             data["container_events"] = converted
         return data
@@ -595,10 +595,10 @@ def validate_container_events(v):
     if v and isinstance(v, list):
         for event in v:
             if not isinstance(event, dict) or "event" not in event:
-                logging.warning(f"Ignoring Error in config in field 'container_events': '{event}' is not a dict or does not have an 'event' key.")
+                logging.warning(f"Ignoring invalid field in config 'container_events': '{event}' is not a dict or does not have an 'event' key.")
                 continue
             if event["event"] not in SUPPORTED_CONTAINER_EVENTS:
-                logging.warning(f"Ignoring Error in config in field 'container_events': '{event['event']}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
+                logging.warning(f"Ignoring invalid field in config 'container_events': '{event['event']}' is not a valid event. Valid events are: {SUPPORTED_CONTAINER_EVENTS}")
                 continue
             converted.append(event)
     else:

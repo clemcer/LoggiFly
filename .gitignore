@@ -1,3 +1,4 @@
+docs/guide/schema/v2_schema.json
 experimenting
 testing
 config.yaml
@@ -12,3 +13,6 @@ compose.dev.yaml
 tests/
 requirements-dev.txt
 release-prep/
+v2-config/
+archive/
+dist/

@@ -12,15 +12,17 @@ from dataclasses import dataclass
 import socket
 from docker.tls import TLSConfig
 from urllib.parse import urlparse
-from pydantic import ValidationError
 from typing import List
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from config.load_config import load_config, format_pydantic_error, ConfigLoadError
 from docker_monitoring.monitor import DockerLogMonitor
 from notifier import send_notification
-from utils import convert_to_int
+from trigger import shutdown_trigger_executor
+from utils import convert_to_int, get_env_var
+
+from config.load_config import load_config, ConfigLoadError
+from config.helpers import format_pydantic_error
 
 logging.basicConfig(
     level="INFO",
@@ -40,7 +42,7 @@ class DockerClientInfo:
     client: docker.DockerClient
     tls_config: TLSConfig | None
     label: str | None
-    hostname: str | None
+    hostname: str
     monitor: DockerLogMonitor | None = None
 
 
@@ -70,7 +72,7 @@ def create_handle_signal(docker_hosts: List[DockerClientInfo], config, config_ob
     monitor_instances = [host_info.monitor for host_info in docker_hosts if host_info.monitor]
 
     def handle_signal(signum, frame):
-        if not config.settings.disable_shutdown_message:
+        if config.settings.is_notification_enabled("shutdown") is True:
             send_notification(config=config,
                             title=get_title_prefix(docker_hosts) + "LoggiFly", 
                             message="Shutting down")
@@ -85,6 +87,7 @@ def create_handle_signal(docker_hosts: List[DockerClientInfo], config, config_ob
             thread.start()
         for thread in threads:
             thread.join(timeout=2)    
+        shutdown_trigger_executor()
         global_shutdown_event.set()
 
     return handle_signal, global_shutdown_event
@@ -136,11 +139,9 @@ class ConfigHandler(FileSystemEventHandler):
         logging.info("Config change detected, reloading config...")
         try:
             new_config, _ = load_config()
-        except (ValidationError, ConfigLoadError) as e:
-            if isinstance(e, ValidationError):
-                logging.critical(f"Config validation failed (keeping old config): {format_pydantic_error(e)}")
-            else:
-                logging.critical("Config loading failed (keeping old config)")
+        except ConfigLoadError as e:
+            logging.critical(e)
+            logging.info("Keeping old config since config loading failed.")
             return
 
         # Only update if loading and validation succeeded
@@ -153,7 +154,7 @@ class ConfigHandler(FileSystemEventHandler):
         message = format_message(messages, "LoggiFly is not monitoring anything.")
 
         logging.info(f"Config reloaded successfully.\n{message}")
-        if self.config.settings.disable_config_reload_message is False:
+        if self.config.settings.is_notification_enabled("config_reload") is True:
             send_notification(
                 config=self.config,
                 title="LoggiFly: The config file was reloaded",
@@ -191,9 +192,9 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
     Returns:
         Thread: The monitoring thread
     """
-    health_enabled = os.getenv("ENABLE_HEALTHCHECK", "").strip().lower() == "true"
-    heartbeat_path = os.getenv("HEARTBEAT_PATH", "/dev/shm/loggifly-heartbeat") # works in read_only containers
-    heartbeat_interval = convert_to_int(os.getenv("HEARTBEAT_INTERVAL", "60"), fallback_value=60, min_value=3)
+    health_enabled = str(get_env_var("ENABLE_HEALTHCHECK", fallback_value="false")).strip().lower() == "true"
+    heartbeat_path = str(get_env_var("HEARTBEAT_PATH", fallback_value="/dev/shm/loggifly-heartbeat")) # works in read_only containers
+    heartbeat_interval = convert_to_int(get_env_var("HEARTBEAT_INTERVAL", fallback_value="60"), fallback_value=60, min_value=3)
 
     logging.debug(
         f"Healthcheck enabled with interval {heartbeat_interval}s and path {heartbeat_path}" if health_enabled else "Healthcheck is disabled"
@@ -402,14 +403,13 @@ def start_loggifly():
     Returns:
         threading.Event: Global shutdown event that can be waited on
     """
+    log_level = str(get_env_var("LOG_LEVEL", "INFO")).upper()
+    logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
     try:
         config, path = load_config()
-    except (ValidationError, ConfigLoadError) as e:
-        if isinstance(e, ValidationError):
-            logging.critical(f"Config validation failed: {format_pydantic_error(e)}")
-        else:
-            logging.critical("Config loading failed")
-        logging.info("Waiting 5s to prevent restart loop...")
+    except ConfigLoadError as e:
+        logging.critical(e)
+        logging.info("Config loading Failed. Waiting 5s to prevent restart loop...")
         time.sleep(5)
         sys.exit(1)
 
@@ -432,7 +432,7 @@ def start_loggifly():
     message = format_message(start_messages, "LoggiFly started without monitoring anything.")
 
     logging.info(f"LoggiFly started.\n{message}")
-    if config.settings.disable_start_message is False:
+    if config.settings.is_notification_enabled("start") is True:
         send_notification(
             config=config,
             title=get_title_prefix(docker_hosts) + "LoggiFly started",

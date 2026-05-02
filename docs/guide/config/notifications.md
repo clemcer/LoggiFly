@@ -10,6 +10,13 @@ In the config.yaml under the `notifications` section you can configure the follo
 - [Apprise](#apprise)
 - [Custom Webhook](#custom-webhook)
 
+```yaml
+notifications:
+  ntfy: ...
+  apprise: ...
+  webhook: ...
+```
+
 You can also set all three notification services at the same time.
 
 In this section only yaml configuration is shown. Environment variables are also supported and can be found [here](../environment-variables#notifications).

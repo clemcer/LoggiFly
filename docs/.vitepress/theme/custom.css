@@ -34,3 +34,13 @@
 /* table {
     width: 140%;
 } */
+
+:root {
+  --vp-layout-max-width: 1920px;
+}
+
+/* With sidebar + aside (ToC) */
+.VPDoc.has-aside .content-container {
+  max-width: 1168px !important;
+}
+

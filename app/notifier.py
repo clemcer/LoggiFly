@@ -5,26 +5,25 @@ import base64
 import logging
 from pydantic import SecretStr
 import urllib.parse
-from config.config_model import GlobalConfig
 from email.header import Header
-from constants import EMOJI_PATTERN
+from constants import EMOJI_PATTERN, NotificationPrefix
 from notification_formatter import NotificationContext
 from utils import merge_with_precedence, LogAttachment
+
+from config.models import RootConfig
+from config.models import NtfyConfig, AppriseConfig, WebhookConfig
 
 
 logger = logging.getLogger(__name__)
 logging.getLogger("apprise").setLevel(logging.INFO)
 
-NTFY_KEYS = {
-    "url", "topic", "token", "username", "password", "tags",
-    "priority", "actions", "icon", "click", "markdown", "headers"
-    }
-APPRISE_KEYS = {"url"}
-WEBHOOK_KEYS = {"url", "headers"}
+NTFY_KEYS = set(NtfyConfig.model_fields.keys())
+APPRISE_KEYS = set(AppriseConfig.model_fields.keys())
+WEBHOOK_KEYS = set(WebhookConfig.model_fields.keys())
 
-NTFY_PREFIX = "ntfy_"
-APPRISE_PREFIX = "apprise_"
-WEBHOOK_PREFIX = "webhook_"
+NTFY_PREFIX = NotificationPrefix.NTFY.value
+APPRISE_PREFIX = NotificationPrefix.APPRISE.value
+WEBHOOK_PREFIX = NotificationPrefix.WEBHOOK.value
 
 
 def emoji_to_rfc2047(match):
@@ -59,7 +58,6 @@ def build_ntfy_action_header(actions: list) -> str:
         return out
 
     action_list = []
-    header = ""
     for idx, a in enumerate(actions, 1):
         if idx > 3:
             logging.warning(f"Ntfy Action: You can only have up to 3 actions. Only using the first 3 actions: '{actions[:3]}'.")
@@ -117,16 +115,16 @@ def _normalize_and_strip_prefix(d: dict, prefix: str, keys: set[str]) -> dict:
 
 def get_notification_config(modular_settings: dict, global_service_config: dict, prefix: str, keys: set[str]) -> dict:
     """
-    Prepare a notification config with precedence: trigger > unit > global.
+    Prepare a notification config with precedence: trigger > target > global.
     Keys may be provided with or without 'prefix' prefix.
     """
     return merge_with_precedence(
         _normalize_and_strip_prefix(modular_settings, prefix, keys),
         _normalize_and_strip_prefix(global_service_config, prefix, keys),
+        # ntfy_actions, webhook_headers, ntfy_headers override each other and are not merged with settings from defaults
         list_union=False,
         dict_merge=False,
     )
-
 
 def send_apprise_notification(url, message, title, attachment: LogAttachment | None = None):
     """
@@ -194,9 +192,14 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
 
     headers = {
         "Title": title.encode("latin-1", errors="ignore").decode("latin-1").strip(),
-        "Icon": "https://raw.githubusercontent.com/clemcer/LoggiFly/refs/heads/main/docs/public/icon.png",
         "Priority": f"{ntfy_config.get('priority', 3)}"
     }
+
+    if ntfy_config.get("icon") is not None:
+        headers["Icon"] = ntfy_config.get("icon")
+    else:
+        headers["Icon"] = "https://raw.githubusercontent.com/clemcer/LoggiFly/refs/heads/main/docs/public/icon.png"
+
     if ntfy_config.get("token"):
         headers["Authorization"] = f"Bearer {ntfy_config['token']}"
     elif ntfy_config.get('username') and ntfy_config.get('password'):
@@ -207,13 +210,11 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
     if ntfy_config.get('actions'):
         action_header = build_ntfy_action_header(ntfy_config.get('actions', []))
         headers["Actions"] = action_header
-    if ntfy_config.get("tags"):
+    if ntfy_config.get("tags") is not None:
         headers["Tags"] = ntfy_config.get("tags")
-    if ntfy_config.get("icon"):
-        headers["Icon"] = ntfy_config.get("icon")
     if ntfy_config.get("click"):
         headers["Click"] = ntfy_config.get("click")
-    if ntfy_config.get("markdown"):
+    if ntfy_config.get("markdown") is not None:
         headers["Markdown"] = str(ntfy_config.get("markdown"))
     if ntfy_config.get("headers"):
         headers.update(ntfy_config.get("headers"))
@@ -227,19 +228,22 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
                 response = requests.post(
                     f"{ntfy_config['url']}/{ntfy_config['topic']}?message={urllib.parse.quote(message)}",
                     data=file_content,
-                    headers=headers
+                    headers=headers,
+                    timeout=10
                 )
             else:
                 response = requests.post(
                     f"{ntfy_config['url']}/{ntfy_config['topic']}",
                     data=file_content,
-                    headers=headers
+                    headers=headers,
+                    timeout=10
                 )
         else:
             response = requests.post(
                 f"{ntfy_config['url']}/{ntfy_config['topic']}",
                 data=message,
-                headers=headers
+                headers=headers,
+                timeout=10
             )
         if response.status_code == 200:
             logger.info("Ntfy-Notification sent successfully")
@@ -268,28 +272,28 @@ def send_webhook(json_data: dict, webhook_config: dict):
     except requests.RequestException as e:
         logger.error(f"Error trying to send webhook to url: {url}, headers: {headers}: %s", e)
 
-
-def send_notification(config: GlobalConfig, 
-                      title: str, 
-                      message: str,
-                      modular_settings: dict | None = None,
-                      attachment: LogAttachment | None = None,
-                      notification_context: NotificationContext | None = None,
-                      ):
+def send_notification(
+    config: RootConfig, 
+    title: str, 
+    message: str,
+    trigger_context: dict | None = None,
+    attachment: LogAttachment | None = None,
+    notification_context: NotificationContext | None = None,
+    ):
     """
     Dispatch a notification using ntfy, Apprise, and/or webhook based on configuration.
     Handles message formatting, file attachments, and host labeling.
     """
     message = message.replace(r"\n", "\n").strip() if message else ""
     nc = config.notifications.model_dump(exclude_none=True)
-    ntfy_config = get_notification_config(modular_settings or {}, nc.get("ntfy", {}), NTFY_PREFIX, NTFY_KEYS)
-    apprise_url = get_notification_config(modular_settings or {}, nc.get("apprise", {}), APPRISE_PREFIX, APPRISE_KEYS).get("url")
-    webhook_config = get_notification_config(modular_settings or {}, nc.get("webhook", {}), WEBHOOK_PREFIX, WEBHOOK_KEYS)
+    trigger_context = trigger_context or {}
+    ntfy_config = get_notification_config(trigger_context, nc.get("ntfy") or {}, NTFY_PREFIX, NTFY_KEYS)
+    apprise_url = get_notification_config(trigger_context, nc.get("apprise") or {}, APPRISE_PREFIX, APPRISE_KEYS).get("url")
+    webhook_config = get_notification_config(trigger_context, nc.get("webhook") or {}, WEBHOOK_PREFIX, WEBHOOK_KEYS)
 
     # Send ntfy notification if configured
     if ntfy_config and ntfy_config.get("url") and ntfy_config.get("topic"):
         send_ntfy_notification(ntfy_config, message=message, title=title, attachment=attachment)
-
     # Send Apprise notification if configured   
     if apprise_url:
         send_apprise_notification(apprise_url, message=message, title=title, attachment=attachment)

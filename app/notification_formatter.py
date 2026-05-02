@@ -3,93 +3,32 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from string import Formatter
 from typing import Dict, Optional, List, Any
 
+from jinja2 import Environment, Undefined
+
 from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, MonitorType
-from docker_monitoring.helpers import ContainerSnapshot
+from monitoring.base import SourceMetadata
 
 logger = logging.getLogger(__name__)
 
 
-class SafeDict(dict):
-    """
-    dict subclass that remembers missing keys so callers can decide
-    whether to fall back to a default value.
-    """
+class _WarnUndefined(Undefined):
+    def __str__(self):
+        logger.warning(f"Template variable '{{{{ {self._undefined_name} }}}}' is not defined")
+        return ""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.missing_keys = set()
 
-    def __missing__(self, key):
-        self.missing_keys.add(key)
-        return "{" + key + "}"
+_jinja_env = Environment(undefined=_WarnUndefined)
 
-def _format_with_safe_dict(template: str, data: Dict[str, Any]) -> tuple[str, set]:
+
+def _render_template(template: str, data: Dict[str, Any]) -> str:
     try:
-        safe = SafeDict(data)
-        rendered = template.format_map(safe)
-        return rendered, safe.missing_keys
+        tmpl = _jinja_env.from_string(template)
+        return tmpl.render(**data)
     except Exception as e:
-        logger.warning(f"Template formatting failed: {e}. Attempting partial formatting.")
-    try:
-        rendered, missing = _partial_format(template, data)
-        logger.info(f"Partial formatting succeeded: {rendered}")
-        if missing:
-            logger.warning(f"Missing keys in partial formatting: {missing}")
-        return rendered, missing
-    except Exception as e:
-        logger.error(f"Partial formatting also failed: {e}")
-        return template, set()
-
-def _partial_format(template: str, data: Dict[str, Any]) -> tuple[str, set]:
-    """
-    Extract fields using Python's Formatter, test each individually, replace valid ones.
-    """
-    formatter = Formatter()
-    fields_to_test = []
-    seen_fields = set()
-
-    for literal_text, field_name, format_spec, conversion in formatter.parse(template):
-        # field_name is None for literal text portions (including escaped braces)
-        if field_name is None:
-            continue
-        full_field = field_name
-        if conversion:
-            full_field = f"{full_field}!{conversion}"
-        if format_spec:
-            full_field = f"{full_field}:{format_spec}"
-
-        if full_field not in seen_fields:
-            seen_fields.add(full_field)
-            fields_to_test.append(full_field)
-
-    # Test each unique field individually
-    valid_fields = {}
-    invalid_fields = []
-    all_missing_keys = set()
-
-    for field in fields_to_test:
-        test_template = f"{{{field}}}"
-        try:
-            safe = SafeDict(data)
-            result = test_template.format_map(safe)
-            valid_fields[field] = result
-            all_missing_keys.update(safe.missing_keys)
-        except (ValueError, KeyError, TypeError) as e:
-            invalid_fields.append((field, str(e)))
-            logger.warning(f"Invalid template field '{{{field}}}': {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error testing template field '{field}': {e}")
-            invalid_fields.append((field, str(e)))
-
-    # Replace valid fields in the original template
-    result = template
-    for field, value in valid_fields.items():
-        result = result.replace(f"{{{field}}}", value)
-
-    return result, all_missing_keys
+        logger.warning(f"Template rendering failed: {e}")
+        return template
 
 
 def extract_fields_from_json(log_line: str) -> Dict[str, Any]:
@@ -121,24 +60,24 @@ def extract_fields_from_regex(log_line: str, regex: Optional[str]) -> Dict[str, 
 
 def default_title_for_log_match(
     keywords_found: List[str],
-    unit_name: str,
+    target_name: str,
 ) -> str:
     """Preserve current default title semantics for log matches."""
     if len(keywords_found) == 1:
-        title = f"'{keywords_found[0]}' found in {unit_name}"
+        title = f"'{keywords_found[0]}' found in {target_name}"
     elif len(keywords_found) == 2:
         joined = " and ".join(f"'{w}'" for w in keywords_found)
-        title = f"{joined} found in {unit_name}"
+        title = f"{joined} found in {target_name}"
     elif len(keywords_found) > 2:
         joined = ", ".join(f"'{w}'" for w in keywords_found)
-        title = f"The following keywords were found in {unit_name}: {joined}"
+        title = f"The following keywords were found in {target_name}: {joined}"
     else:
-        title = unit_name
+        title = target_name
     return title
 
 
-def fallback_title_for_event(unit_name: str, event: Optional[str]) -> str:
-    return f"Event '{event}' for container {unit_name}" if event else f"Event for container {unit_name}"
+def fallback_title_for_event(target_name: str, event: Optional[str]) -> str:
+    return f"Event '{event}' for container {target_name}" if event else f"Event for container {target_name}"
 
 
 @dataclass
@@ -149,7 +88,7 @@ class NotificationContext:
     """
 
     notification_type: NotificationType
-    unit_name: str
+    target_name: str
     monitor_type: MonitorType
     hostname: Optional[str] = None
     host_identifier: Optional[str] = None # hostname for multi-host setups, "manager@node1" or "worker@node2" for swarm, else None
@@ -158,6 +97,9 @@ class NotificationContext:
     log_line: Optional[str] = None
     regex: Optional[str] = None
     keywords_found: List[str] = field(default_factory=list)
+    trigger_on: Optional[dict] = None
+    trigger_on_count: Optional[int] = None
+    trigger_on_timeframe: Optional[int] = None
   
     # container event fields
     event: Optional[str] = None
@@ -165,17 +107,17 @@ class NotificationContext:
     signal: Optional[str] = None
 
     # action fields
-    action_type: Optional[str] = None
-    action_string: Optional[str] = None
-    action_target: Optional[str] = None
-    action_result: Optional[str] = None
-    action_succeeded: Optional[bool] = None
+    container_action_type: Optional[str] = None
+    container_action_string: Optional[str] = None
+    container_action_target: Optional[str] = None
+    container_action_result_message: Optional[str] = None
+    container_action_succeeded: Optional[bool] = None
 
     extra_fields: Dict[str, Any] = field(default_factory=dict)
     time: Optional[int | float] = None
-    
-    # from container snapshot
-    container_snapshot: Optional[ContainerSnapshot] = None
+
+    # from source metadata
+    source_metadata: Optional[SourceMetadata] = None
     container_id: Optional[str] = None
     container_name: Optional[str] = None
     swarm_service_name: Optional[str] = None
@@ -183,16 +125,20 @@ class NotificationContext:
     image: Optional[str] = None
 
     def __post_init__(self):
-        # from container snapshot
-        if self.container_snapshot:
-            self.image = self.container_snapshot.image if not self.image else self.image
-            self.container_id = self.container_snapshot.id if not self.container_id else self.container_id
-            self.swarm_service_name = self.container_snapshot.service_name if not self.swarm_service_name else self.swarm_service_name
-            self.stack_name = self.container_snapshot.stack_name if not self.stack_name else self.stack_name
-            self.container_name = self.container_snapshot.name if not self.container_name else self.container_name
+        # Extract fields from source metadata
+        if self.source_metadata:
+            self.image = self.source_metadata.image if not self.image else self.image
+            self.container_id = self.source_metadata.container_id if not self.container_id else self.container_id
+            self.swarm_service_name = self.source_metadata.service_name if not self.swarm_service_name else self.swarm_service_name
+            self.stack_name = self.source_metadata.stack_name if not self.stack_name else self.stack_name
+            self.container_name = self.source_metadata.container_name if not self.container_name else self.container_name
+        
+        if self.trigger_on:
+            self.trigger_on_count = self.trigger_on.get("count")
+            self.trigger_on_timeframe = self.trigger_on.get("timeframe")
 
     def get_defaults(self) -> Dict[str, Any]:
-                # Convert Unix timestamp to datetime or use current time
+        # Convert Unix timestamp to datetime or use current time
         if self.time is not None:
             try:
                 dt = datetime.fromtimestamp(self.time)
@@ -211,8 +157,8 @@ class NotificationContext:
             "container_name": self.container_name,
             "service_name": self.swarm_service_name,
             "stack_name": self.stack_name,
-            "target_name": self.unit_name,   # unit_name will internally be renamed to target_name in the future 
-            "container": self.unit_name, # legacy template field   
+            "target_name": self.target_name,
+            "container": self.target_name, # legacy template field
             "docker_image": self.image,
             
             "hostname": self.hostname,
@@ -223,7 +169,11 @@ class NotificationContext:
             "log_entry": self.log_line,
             "keywords": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
             "keyword": ", ".join(f"'{w}'" for w in self.keywords_found) if self.keywords_found else None,
+            "keywords_list": self.keywords_found,
+            "trigger_on_count": self.trigger_on_count,
+            "trigger_on_timeframe": self.trigger_on_timeframe,
 
+            
             "timestamp": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "date": dt.strftime("%Y-%m-%d"),
             "time": dt.strftime("%H:%M:%S"),
@@ -233,11 +183,11 @@ class NotificationContext:
             "exit_code": self.exit_code,
             "signal": self.signal,
 
-            "action_type": self.action_type,
-            "action_string": self.action_string,
-            "action_target": self.action_target,
-            "action_result_message": self.action_result,
-            "action_succeeded": self.action_succeeded,
+            "container_action_type": self.container_action_type,
+            "container_action_string": self.container_action_string,
+            "container_action_target": self.container_action_target,
+            "container_action_result_message": self.container_action_result_message,
+            "container_action_succeeded": self.container_action_succeeded,
         }
 
         return defaults
@@ -278,32 +228,28 @@ def render_title(
     context_dict = ctx.to_dict()
     title = None
     if template:
-        rendered, missing = _format_with_safe_dict(template, context_dict)
-        if missing:
-            logging.warning(f"Missing keys in title template: {missing}.")
-        title = rendered
+        title = _render_template(template, context_dict)
 
     # Default when no template is provided
     if not title:
         if ctx.notification_type == NotificationType.LOG_MATCH:
-            title = default_title_for_log_match(ctx.keywords_found, ctx.unit_name)
+            title = default_title_for_log_match(ctx.keywords_found, ctx.target_name)
         elif ctx.notification_type == NotificationType.DOCKER_EVENT:
             if ctx.event:
                 logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')}")
-                title, missing = _format_with_safe_dict(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
-                if missing:
-                    title = fallback_title_for_event(ctx.unit_name, ctx.event)
-                    logging.warning(f"Missing keys in event default title template: {missing}.")
+                title = _render_template(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
+                if not title:
+                    title = fallback_title_for_event(ctx.target_name, ctx.event)
 
         # Prepend host identifier to title (only exists for multi-host or swarm setups)
         if ctx.host_identifier:
             title = f"[{ctx.host_identifier}] - {title}"
-        if ctx.action_result is not None:
-            title = f"{title} ({ctx.action_result})"
+        if ctx.container_action_result_message is not None:
+            title = f"{title} ({ctx.container_action_result_message})"
 
     # Safe fallback
     if not title:
-        title = f"{ctx.unit_name}: {context_dict.get('keywords') or context_dict.get('event')}"
+        title = f"{ctx.target_name}: {context_dict.get('keywords') or context_dict.get('event')}"
     # Append action result to title
     return title
 
@@ -322,16 +268,12 @@ def render_message(
 
     if template:
         logger.debug(f"Rendering message with template: {template}")
-        rendered, missing = _format_with_safe_dict(template, context_dict)
-        if missing:
-            logging.warning(f"Missing keys in message template: {missing}.")
-        return rendered
+        return _render_template(template, context_dict)
     # Fallback default message for events
     if ctx.notification_type == NotificationType.DOCKER_EVENT:
         if ctx.event in MAP_EVENT_TO_MESSAGE:
-            rendered, missing = _format_with_safe_dict(MAP_EVENT_TO_MESSAGE[ctx.event], context_dict)
-            if not missing:
+            rendered = _render_template(MAP_EVENT_TO_MESSAGE[ctx.event], context_dict)
+            if rendered:
                 return rendered
-            logging.warning(f"Missing keys in default event message template: {missing}. Falling back to default message.")
     # Fallback
     return default_message or ctx.log_line or ""

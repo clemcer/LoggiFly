@@ -43,17 +43,17 @@ services:
 
 ```yaml
 containers:
-  fluentbit:
-    keywords:
-      - keyword_group: 
-          - ssh
-          - failed
-          - password
-        title_template: 'Failed SSH Login Attempt'
-        message_template: '{MESSAGE}' # this is a field available in the JSON log entry
-        notification_cooldown: 0
-        ntfy_tag: rotating_light
-
+  rules:
+    - container_name: fluentbit
+      keywords:
+        - all_of: 
+            - keyword: ssh
+            - keyword: failed
+            - keyword: password
+          title_template: 'Failed SSH Login Attempt'
+          message_template: '{{ MESSAGE }}' # this is a field available in the JSON log entry
+          trigger_cooldown: 0
+          ntfy_tag: rotating_light
 ```
 
 ### Result
