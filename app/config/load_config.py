@@ -153,6 +153,25 @@ def override_with_env(cnf: dict) -> dict:
     return cnf
 
 
+def is_v1_config(config: dict) -> bool:
+    if config.get("version") == 2:
+        return False
+    c = config.get("containers", {})
+    if isinstance(c, dict) and isinstance(c.get("rules"), list):
+        return False
+    if config.get("global", {}).get("defaults"):
+        return False
+
+    if config.get("global_keywords"):
+        return True
+    if config.get("swarm_services") and not config.get("swarm"):
+        return True
+    v2_container_keys = {"rules", "groups", "never_monitor", "scope", "keywords", "container_events"}
+    if isinstance(c, dict) and c and not (c.keys() & v2_container_keys):
+        return True
+    return False
+
+
 def load_config(path: str = CONFIG_PATH):
     config_path = None
     yaml_config = None
@@ -188,12 +207,27 @@ def load_config(path: str = CONFIG_PATH):
     try:
         config = RootConfig.model_validate(yaml_config)
     except ValidationError as e:
+        is_v1 = is_v1_config(yaml_config)      
         logging.debug(e)
-        error_message = (
-            f"Config validation failed: {format_pydantic_error(e)} (Enable Debug Logging (via env) to see full pydantic error)\n"
-            "You can also set the environment variable STRICT_CONFIG to false to ignore (most) validation errors and only log warnings instead. "
-            "However this means that the parts of the config causing the error might get ignored and not applied.  You should always double check for any warnings if you decide to do this."
+        if is_v1:
+            error_message = (
+                f"\n{'-' * 100}\n"
+                "CONFIG VALIDATION ERROR: CONFIG SEEMS TO BE IN V1 FORMAT\n"
+                "Please check out https://clemcer.github.io/LoggiFly/guide/migrate-to-v2 to migrate to v2\n"
+                f"\n{'-' * 100}\n"
+                f"Error: {format_pydantic_error(e)}"
+                f"\n{'-' * 100}\n"
+                "CONFIG VALIDATION ERROR: CONFIG SEEMS TO BE IN V1 FORMAT\n"
+                "Please check out https://clemcer.github.io/LoggiFly/guide/migrate-to-v2 to migrate to v2\n"
+                f"\n{'-' * 100}\n"
             )
+        else:
+            error_message = (
+                f"Config validation failed: {format_pydantic_error(e)} (Enable Debug Logging (via env) to see full pydantic error)\n"
+                "You can also set the environment variable STRICT_CONFIG to false to ignore (most) validation errors and only log warnings instead. "
+                "However this means that the parts of the config causing the error might get ignored and not applied.  You should always double check for any warnings if you decide to do this."
+                )
+
         raise ConfigLoadError(error_message)
     except Exception as e:
         raise ConfigLoadError(f"Unexpected error loading config: {e}")
