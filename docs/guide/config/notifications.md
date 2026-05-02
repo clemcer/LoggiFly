@@ -22,7 +22,7 @@ You can also set all three notification services at the same time.
 In this section only yaml configuration is shown. Environment variables are also supported and can be found [here](../environment-variables#notifications).
 
 ::: info
-All notification settings can also be applied individually per container or per keyword/regex pattern (see [containers section](./containers#settings-per-container-and-keyword)).
+All notification settings can also be applied individually per container or per keyword/regex pattern (see [containers section](./containers-and-rules#settings-per-container-and-keyword)).
 :::
 
 

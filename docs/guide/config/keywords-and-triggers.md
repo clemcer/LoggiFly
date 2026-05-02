@@ -40,7 +40,7 @@ keywords:
 
 ::: info
 - keywords are case-insensitive
-- regexes are case-sensitive by default (controlled by `regex_case_sensitive` in [`defaults:`](./settings-and-defaults#defaults))
+- regexes are case-sensitive by default (controlled by `regex_case_sensitive` in [`defaults:`](./settings#defaults))
 - named capturing groups (`(?P<name>...)`) can be used to extract values that become available as template variables in `title_template` and `message_template`. See [Customize Noticications](../customize-notifications/) and [Extract from Regex](../customize-notifications/regex).
 :::
 

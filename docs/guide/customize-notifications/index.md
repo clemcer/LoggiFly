@@ -67,7 +67,7 @@ The following template fields are always available for both `message_template` a
 
 ### Threshold Triggering Information
 
-Only present when [`trigger_on`](../config/keywords#trigger-on) is configured on the matched keyword.
+Only present when [`trigger_on`](../config/keywords-and-triggers#trigger-on) is configured on the matched keyword.
 
 | Field | Description |
 |-------|-------------|
@@ -100,7 +100,7 @@ Only present when a [container action](../actions#container-actions) is triggere
 
 ### Docker Container Event Information
 
-Only available for notifications triggered by [container events](../config/containers#monitor-container-events).
+Only available for notifications triggered by [container events](../config/containers-and-rules#monitor-container-events).
 
 | Field | Description |
 |-------|-------------|

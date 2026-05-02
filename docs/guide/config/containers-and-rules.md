@@ -70,7 +70,7 @@ containers:
     attach_logfile: true
 ```
 
-See [Settings & Defaults](./settings-and-defaults#defaults) for all available fields.
+See [Settings & Defaults](./settings#defaults) for all available fields.
 
 ---
 
@@ -208,7 +208,7 @@ containers:
 
 ### `defaults` fields {#defaults-fields}
 
-Any field under [`defaults:`](./settings-and-defaults#defaults) can be set at rule level effectively overriding the value set under `defaults` or `containers.defaults`.
+Any field under [`defaults:`](./settings#defaults) can be set at rule level effectively overriding the value set under `defaults` or `containers.defaults`.
 
 ```yaml
 defaults:
@@ -261,7 +261,7 @@ containers:
 When a container matches **multiple rules**, their configurations are merged in list order:
 
 - **Triggers** (`keywords`, `container_events`): **merged** across all levels. Source-level keywords come first, then rule keywords in order.
-- **Settings from [`defaults`](settings-and-defaults#defaults) fields** (e.g. `trigger_cooldown`, `attach_logfile`, `ntfy_priority`): see [Inheritance & Merging of Settings](../config/global#inheritance--merging-of-settings).
+- **Settings from [`defaults`](settings#defaults) fields** (e.g. `trigger_cooldown`, `attach_logfile`, `ntfy_priority`): see [Inheritance & Merging of Settings](../config/global#inheritance--merging-of-settings).
 
 ```yaml
 global:

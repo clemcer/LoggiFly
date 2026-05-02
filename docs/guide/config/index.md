@@ -34,10 +34,10 @@ settings:
 - [Keywords & Triggers](keywords-and-triggers): covers the configuration of triggers like `keywords:` and `container_events:`
 
 **Reference:**
-- [Config Schema](config/schema): dynamically generated schema reference of the whole config
-- [Environment Variables](environment-variables): environment variables that can be used instead of or in addition to the config file
+- [Config Schema](../schema/): dynamically generated schema reference of the whole config
+- [Environment Variables](../environment-variables): environment variables that can be used instead of or in addition to the config file
 - [Configuration via Labels](label-config): how to configure LoggiFly via Docker labels
-- [Swarm](swarm): covers `swarm:` specific differences from `containers:` section
+- [Swarm](../swarm): covers `swarm:` specific differences from `containers:` section
 
 
 ## Full Config Reference
