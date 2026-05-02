@@ -64,7 +64,7 @@ Get instant alerts for security breaches, system errors, or custom patterns thro
 ## Documentation
 - [Documentation](https://clemcer.github.io/loggifly/)
 - [Getting Started](https://clemcer.github.io/loggifly/guide/getting-started)
-- [Configuration](https://clemcer.github.io/loggifly/guide/config-structure.html)
+- [Configuration](https://clemcer.github.io/loggifly/guide/config)
 
 # Support
 
