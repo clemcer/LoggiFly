@@ -198,7 +198,7 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
     if ntfy_config.get("icon") is not None:
         headers["Icon"] = ntfy_config.get("icon")
     else:
-        headers["Icon"] = "https://raw.githubusercontent.com/clemcer/LoggiFly/refs/heads/main/docs/public/icon.png"
+        headers["Icon"] = "https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/loggifly.png"
 
     if ntfy_config.get("token"):
         headers["Authorization"] = f"Bearer {ntfy_config['token']}"
