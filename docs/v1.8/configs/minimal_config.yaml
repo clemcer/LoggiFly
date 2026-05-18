@@ -1,0 +1,25 @@
+containers:
+  container-name:  # Exact container name
+    keywords:
+      - error
+      - regex: (username|password).*incorrect 
+  another-container:
+    keywords:
+      - login
+    
+# Optional. These keywords are being monitored for all configured containers. 
+global_keywords:
+  keywords:
+    - failed
+    - critical
+
+notifications:     
+  # Configure either ntfy or Apprise or both
+  ntfy:
+    url: http://your-ntfy-server  
+    topic: loggifly                   
+    token: ntfy-token               # ntfy token in case you need authentication 
+    username: john                  # ntfy Username + Password in case you need authentication 
+    password: 1234                  # ntfy Username + Password in case you need authentication 
+  apprise:
+    url: "discord://webhook-url"    # Any Apprise-compatible URL (https://github.com/caronc/apprise/wiki)
