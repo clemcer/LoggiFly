@@ -2,6 +2,7 @@ import DefaultTheme from 'vitepress/theme'
 import { h, onMounted, watch } from 'vue'
 import { useRoute } from 'vitepress'
 import './custom.css'
+import VersionSwitcher from '../components/VersionSwitcher.vue'
 
 // Open any <details> ancestors of the element targeted by the current URL hash
 function openDetailsForHash(hash) {
@@ -19,6 +20,9 @@ function openDetailsForHash(hash) {
 
 export default {
   extends: DefaultTheme,
+  enhanceApp({ app }) {
+    app.component('VersionSwitcher', VersionSwitcher)
+  },
   setup() {
     const route = useRoute()
     onMounted(() => {

@@ -1,0 +1,112 @@
+#######    CONFIG TEMPLATE     #######
+#
+# This is a template for the config.yaml file.
+# You can edit this file and remove all the parts you don't need.
+# For the program to function you need to configure: 
+#   - at least one container
+#   - at least one notification service (ntfy or Apprise)
+#   - at least one keyword (either set globally or per container)
+# The rest is optional or has default values.
+#
+# If you want to use this file after editing it make sure to rename it to config.yaml
+#
+# With every container example you can see some more available configuration options
+#
+# I did not include the option to customize notifications in this template but
+# here is a detailed explanation: https://clemcer.io/loggifly/customize-notifications
+
+containers:
+
+  container1: # leave blank if you only need global keywords
+
+  container2:
+    keywords:
+      - keyword1               # simple keyword
+      - regex: regex-patern1   # this is how to set regex patterns
+      - keyword: keyword2      # another way to set a simple keyword
+      
+
+  container3:
+    keywords:
+      - keyword: keyword1
+        attach_logfile: true  # Attach a log file to the notification
+      - regex: regex-pattern1
+        action: restart  # Restart the container when this regex pattern is found
+      - keyword: keyword2
+        action: stop     # Stop the container when this keyword is found
+  
+  # You can also set a lot of settings per container or per keyword
+  # Here is an overview of the available settings: https://github.com/clemcer/loggifly/tree/main#-settings-overview--hierarchy-explained
+  container4:
+    apprise_url: "discord://webhook-url"  
+    ntfy_tags: closed_lock_with_key   
+    ntfy_priority: 5
+    ntfy_topic: container3
+    attachment_lines: 50
+    notification_title: '{keywords} found in {container}'
+    notification_cooldown: 2  
+    attach_logfile: true
+    action_cooldown: 60 
+    hide_regex_in_title: true
+  
+    keywords:
+      - keyword1
+      - keyword2
+
+      - regex: regex-pattern1
+        ntfy_tags: closed_lock_with_key   
+        ntfy_priority: 5
+        ntfy_topic: regex-pattern1
+        attachment_lines: 10
+        hide_regex_in_title: false
+
+      - keyword: keyword3
+        apprise_url: "discord://another-webhook-url" 
+        action: restart
+        action_cooldown: 60 
+        notification_title: 'custom title'
+        notification_cooldown: 10
+        attach_logfile: true
+
+          
+# Global keywords are applied to all containers
+global_keywords:
+  keywords:
+    - global_keyword1
+    - regex: regex1
+      attach_logfile: true
+
+notifications:                       
+  # At least one of these (ntfy/Apprise/Webhook) is required.
+  ntfy:
+    url: http://your-ntfy-server    # Required. The URL of your ntfy instance
+    topic: loggifly                 # Required. the topic for ntfy
+    token: ntfy-token               # ntfy token in case you need authentication 
+    username: john                  # ntfy Username + Password in case you need authentication 
+    password: password              # ntfy Username + Password in case you need authentication 
+    priority: 3                     # ntfy priority (1-5)
+    tags: kite,mag                  # ntfy tags/emojis 
+  apprise:
+    url: "discord://webhook-url"    # Any Apprise-compatible URL (https://github.com/caronc/apprise/wiki)
+  webhook: 
+    url: https://custom.endpoint.com/post
+    headers:                        # add headers if needed
+      Authorization: "Bearer token"
+      X-Custom-Header": "Test123"  
+
+# These are the default settings
+settings:          
+  log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+  multi_line_entries: True      # Catch log entries that span multiple lines instead of going line by line.
+  reload_config: True           # When the config file is changed the program reloads the config
+  disable_start_message: False           # Suppress startup notification
+  disable_shutdown_message: False        # Suppress shutdown notification
+  disable_config_reload_message: False   # Suppress config reload notification
+  disable_container_event_message: False # Suppress notification when monitoring of containers start/stop
+
+  notification_cooldown: 5      # Seconds between alerts for same keyword (per container)
+  notification_title: default   # configure a custom template for the notification title (see section below)
+  action_cooldown: 300          # Cooldown period (in seconds) before the next container action can be performed. Maximum is always at least 60s.
+  attach_logfile: False          # Attach a log file to all notifications
+  attachment_lines: 20          # Number of Lines to include in log attachments
+  hide_regex_in_title: False   # Exclude regex pattern from the notification title for a cleaner look
