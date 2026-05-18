@@ -214,6 +214,7 @@ class NotificationContext:
         ctx.update(defaults)
         ctx.update(regex_fields)
         ctx.update(json_fields)
+        ctx["json"] = json_fields
         ctx.update(self.extra_fields or {})
         return ctx
 

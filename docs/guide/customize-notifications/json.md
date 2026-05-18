@@ -56,12 +56,14 @@ containers:
 
 You can also extract data from nested JSON structures, including dictionaries and lists:
 
-- <code v-pre>{{ key }}</code> for top-level fields
-- <code v-pre>{{ dict['key'] }}</code> or <code v-pre>{{ dict.key }}</code>for nested fields
+- <code v-pre>{{ key }}</code> or <code v-pre>{{ json["key"] }}</code> or <code v-pre>{{ json.key }}</code> for top-level fields (access via `json.key` is the same as <code v-pre>{{ key }}</code> and needed for edge cases that are described below)
+- <code v-pre>{{ some['nested']['field'] }}</code> or <code v-pre>{{ some.nested.field }}</code>for nested fields
 - <code v-pre>{{ list[0]['key'] }}</code> for list access (indices starting at 0)
 
 ::: info
-Dot notation (<code v-pre>{{ dict.key }}</code>) only works for keys that are valid Python identifiers, so alphanumeric and underscores only. Use bracket notation for keys with hyphens, spaces, dots, or other special characters.<br>
+Top level fields only work with <code v-pre>{{ key }}</code> when they are valid python identifiers, so alphanumeric and underscores only. For keys with hyphens, spaces, dots, or other special characters use <code v-pre>{{ json["key-with-hyphen"] }}</code> since <code v-pre>{{ key-with-hyphen }}</code> would not work.
+
+The same thing applies to dot notation (<code v-pre>{{ dict.key }}</code>) only works for keys that are valid Python identifiers. For everything else use bracket notation.<br>
 For example, use <code v-pre>{{ dict['key-with-hyphen'] }}</code> as <code v-pre>{{ dict.key-with-hyphen }}</code> would not work.
 :::
 
