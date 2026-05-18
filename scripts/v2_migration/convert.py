@@ -359,6 +359,19 @@ def _migrate_template_syntax(template: str) -> str:
             _log_message(f"WARNING: Format spec ':{spec}' in template field '{{{raw}}}' is not supported in Jinja2 and was dropped.")
         raw = root + rest
 
+        # Rewrite non-identifier root variables (e.g. {some-key}) to json['some-key']
+        if not root.isidentifier():
+            suffix = ''
+            for part in re.split(r'\[([^\]]+)\]', rest)[1::2]:
+                if part.isdigit():
+                    suffix += f'[{part}]'
+                elif part.isidentifier():
+                    suffix += f'.{part}'
+                else:
+                    suffix += f"['{part}']"
+            _log_message(f"Migrated non-identifier template variable '{root}' to json['{root}'] notation")
+            return '{{ ' + f"json['{root}']" + suffix + ' }}'
+
         # Convert bracket access to dot/subscript notation
         parts = re.split(r'\[([^\]]+)\]', raw)
         result = parts[0]  # root field name
@@ -374,7 +387,8 @@ def _migrate_template_syntax(template: str) -> str:
         return '{{ ' + result + ' }}'
 
     # Match {field}, {field[key]}, etc. but not {{ or }} (escaped braces)
-    return re.sub(r'(?<!\{)\{([a-zA-Z_]\w*(?:\[[^\]]*\])*(?:![rsa])?(?::[^}]*)?)\}(?!\})', convert_match, template)
+    # The root may be any non-whitespace, non-brace token (including hyphenated names)
+    return re.sub(r'(?<!\{)\{([a-zA-Z_\-][\w\-]*(?:\[[^\]]*\])*(?:![rsa])?(?::[^}]*)?)\}(?!\})', convert_match, template)
 
 
 def _rename_template_vars(template: str) -> str:
