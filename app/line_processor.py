@@ -3,6 +3,7 @@ import time
 from typing import Any, cast
 import threading
 from threading import Thread, Lock
+from dataclasses import dataclass
 
 from constants import (
     COMPILED_STRICT_PATTERNS,
@@ -14,6 +15,13 @@ from utils import merge_trigger_context, merge_config_levels, TriggerTracker
 from trigger import process_trigger
 from config.models import RootConfig
 from monitoring import MonitoredTarget, EffectiveTargetConfig
+
+@dataclass
+class LogMatchState:
+    trigger_context: dict
+    keyword_level_config: dict
+    log_line: str
+    keywords_found: list
 
 
 class LogProcessor:
@@ -50,6 +58,9 @@ class LogProcessor:
         self.target_name = monitored_target.target_name
         self.monitor_type = monitored_target.monitor_type
         self.target_config = monitored_target.target_config
+
+        # buffer for buffer_seconds setting
+        self.log_match_buffer = {}
 
         # Pattern detection state
         self.patterns = []
@@ -275,6 +286,7 @@ class LogProcessor:
             self.logger.error(f"No keyword or regex found for {keyword_dict}")
         return None
 
+
     def _search_and_process(self, log_line: str):
         """
         Search for keywords/regex in log_line and collect the keyword settings of all found keywords. 
@@ -283,13 +295,15 @@ class LogProcessor:
         keywords_found = []
         keyword_level_config = {}
         target_merge_matches = self.target_config.merge_matches
+        target_buffer_seconds = self.target_config.buffer_seconds
         
         # Search for configured keywords and collect their settings
         for keyword_dict in self.keywords:
             found = self._search_keyword(log_line, keyword_dict)
             if found:
                 merge_matches = keyword_dict.get("merge_matches", target_merge_matches)
-                if merge_matches is True:
+                buffer_seconds = keyword_dict.get("buffer_seconds", target_buffer_seconds)
+                if merge_matches is True and not buffer_seconds:
                     # last override first
                     keyword_level_config = merge_config_levels(
                         precedence=keyword_dict,
@@ -297,12 +311,35 @@ class LogProcessor:
                     )
                     keywords_found.append(found)
                 else:
-                    self._process_log_match(log_line=log_line, keyword_level_config=keyword_dict, keywords_found=[found])
+                    self._filter_log_match(log_line=log_line, keyword_level_config=keyword_dict, keywords_found=[found])
         
         if keywords_found:
-            self._process_log_match(log_line, keyword_level_config, keywords_found)
-            
-    def _process_log_match(self, log_line: str, keyword_level_config: dict, keywords_found: list):
+            self._filter_log_match(log_line, keyword_level_config, keywords_found)
+  
+
+    def _buffer_match(self, lms: LogMatchState):
+        bs = lms.trigger_context["buffer_seconds"]
+        keyword = lms.keywords_found[0]
+        key = f"{keyword}-{bs}"
+
+        def clear():
+            self.logger.debug(f"Clear log match buffer called. clearing in {bs}")
+            time.sleep(bs)
+            l = self.log_match_buffer.pop(key)
+            if not l:
+                return
+            lms.log_line = "\n".join(l)
+            self._process_log_match(lms)
+
+        if not self.log_match_buffer.get(key):
+            self.log_match_buffer[key] = [lms.log_line]
+            clear_thread =Thread(target=clear, daemon=True)
+            clear_thread.start()
+        else:
+            self.log_match_buffer[key].append(lms.log_line)
+
+
+    def _filter_log_match(self, log_line: str, keyword_level_config: dict, keywords_found: list):
         # When an ignored keyword is found, the log line gets ignored and the function returns
         ignored = cast(list[dict], (keyword_level_config.get("ignore_keywords") or []) + (self.target_config_dict.get("ignore_keywords") or []))
         for keyword in ignored:
@@ -311,6 +348,31 @@ class LogProcessor:
                 self.logger.debug(f"Keyword(s) '{keywords_found}' found in '{self.target_name}' but ignored because ignored keyword '{ignored_match}' was found")
                 return
         trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
+
+        lms = LogMatchState(
+            trigger_context=trigger_context,
+            keyword_level_config=keyword_level_config,
+            keywords_found=keywords_found,
+            log_line=log_line
+            )
+
+        bs = trigger_context.get("buffer_seconds")
+        if isinstance(bs, int) and bs > 0:
+            assert len(keywords_found) == 1, "Internal Error, buffer_seconds is only applicable on one found keyword"
+            self.logger.debug(f"Buffering log line with matched keyword: {keywords_found[0]}. buffer_seconds: {bs}")
+            self._buffer_match(lms)
+        else:
+            self._process_log_match(lms)
+
+
+
+    def _process_log_match(self, lms: LogMatchState):
+        # trigger_context: dict, keywords_found: list, log_line: str
+        trigger_context = lms.trigger_context
+        keywords_found = lms.keywords_found
+        log_line = lms.log_line
+        keyword_level_config = lms.keyword_level_config
+        # TODO: maybe change logged message for buffered match?
         formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(log_line.splitlines()) + "\n   -----------------------"
         k = "keyword was found" if len(keywords_found) == 1 else "keywords were found"
         self.logger.info(f"The following {k} in {self.target_name}: {keywords_found}."

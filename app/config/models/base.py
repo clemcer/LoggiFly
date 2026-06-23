@@ -200,6 +200,7 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     regex_case_sensitive: Optional[bool] = Field(None, description="Whether regex patterns are case-sensitive.")
     disable_trigger_notifications: Optional[bool] = Field(None, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: Optional[bool] = Field(None, description="Combine multiple keyword matches from the same log entry into a single notification.")
+    buffer_seconds: Optional[int] = Field(None, description="Seconds to wait and collect matching entries before triggering.")
 
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     """Global default settings applied to all rules unless overridden at a lower level."""
@@ -211,6 +212,7 @@ class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     regex_case_sensitive: bool = Field(True, description="Whether regex patterns are case-sensitive.")
     disable_trigger_notifications: bool = Field(False, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: bool = Field(False, description="Combine multiple keyword matches from the same log entry into a single notification.")
+    buffer_seconds: Optional[int] = Field(0, description="Seconds to wait and collect matching entries before triggering.")
 
 
 # ================================================
