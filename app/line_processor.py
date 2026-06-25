@@ -1,5 +1,6 @@
 import re
 import time
+import json
 from typing import Any, cast
 import threading
 from threading import Thread, Lock
@@ -17,7 +18,7 @@ from config.models import RootConfig
 from monitoring import MonitoredTarget, EffectiveTargetConfig
 
 @dataclass
-class LogMatchState:
+class LogMatchContext:
     trigger_context: dict
     keyword_level_config: dict
     log_line: str
@@ -61,6 +62,7 @@ class LogProcessor:
 
         # buffer for buffer_seconds setting
         self.log_match_buffer = {}
+        self.log_match_buffer_lock = Lock()
 
         # Pattern detection state
         self.patterns = []
@@ -299,10 +301,11 @@ class LogProcessor:
         
         # Search for configured keywords and collect their settings
         for keyword_dict in self.keywords:
-            found = self._search_keyword(log_line, keyword_dict)
+            buffer_seconds = keyword_dict.get("buffer_seconds", target_buffer_seconds)
+            should_buffer = isinstance(buffer_seconds, int) and buffer_seconds > 0
+            found = self._search_keyword(log_line, keyword_dict, ignore_keyword_time=should_buffer)
             if found:
                 merge_matches = keyword_dict.get("merge_matches", target_merge_matches)
-                buffer_seconds = keyword_dict.get("buffer_seconds", target_buffer_seconds)
                 if merge_matches is True and not buffer_seconds:
                     # last override first
                     keyword_level_config = merge_config_levels(
@@ -317,26 +320,36 @@ class LogProcessor:
             self._filter_log_match(log_line, keyword_level_config, keywords_found)
   
 
-    def _buffer_match(self, lms: LogMatchState):
+    def _buffer_match(self, lms: LogMatchContext):
         bs = lms.trigger_context["buffer_seconds"]
         keyword = lms.keywords_found[0]
-        key = f"{keyword}-{bs}"
-
+        key = json.dumps(
+            {
+                "keyword_level_config": lms.keyword_level_config,
+                "trigger_context": lms.trigger_context,
+                "keyword": keyword,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str
+        )
         def clear():
             self.logger.debug(f"Clear log match buffer called. clearing in {bs}")
-            time.sleep(bs)
-            l = self.log_match_buffer.pop(key)
-            if not l:
-                return
+            self.target_stop_event.wait(bs)
+            with self.log_match_buffer_lock:
+                l = self.log_match_buffer.pop(key)
+                if not l:
+                    return
             lms.log_line = "\n".join(l)
             self._process_log_match(lms)
 
-        if not self.log_match_buffer.get(key):
-            self.log_match_buffer[key] = [lms.log_line]
-            clear_thread =Thread(target=clear, daemon=True)
-            clear_thread.start()
-        else:
-            self.log_match_buffer[key].append(lms.log_line)
+        with self.log_match_buffer_lock:
+            if not self.log_match_buffer.get(key):
+                self.log_match_buffer[key] = [lms.log_line]
+                clear_thread = Thread(target=clear, daemon=True)
+                clear_thread.start()
+            else:
+                self.log_match_buffer[key].append(lms.log_line)
 
 
     def _filter_log_match(self, log_line: str, keyword_level_config: dict, keywords_found: list):
@@ -349,7 +362,7 @@ class LogProcessor:
                 return
         trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
 
-        lms = LogMatchState(
+        lms = LogMatchContext(
             trigger_context=trigger_context,
             keyword_level_config=keyword_level_config,
             keywords_found=keywords_found,
@@ -366,7 +379,7 @@ class LogProcessor:
 
 
 
-    def _process_log_match(self, lms: LogMatchState):
+    def _process_log_match(self, lms: LogMatchContext):
         # trigger_context: dict, keywords_found: list, log_line: str
         trigger_context = lms.trigger_context
         keywords_found = lms.keywords_found
