@@ -252,7 +252,7 @@ class DockerLogMonitor:
         identifier = None
         try:
             swarm_info = self.client.info().get("Swarm")
-            node_id = swarm_info.get("NodeID")
+            node_id = swarm_info.get("NodeID") if swarm_info else None
         except Exception as e:
             logging.error(f"Could not get info via docker client. Needed to get info about swarm role (manager/worker)")
             node_id = None
@@ -462,6 +462,8 @@ class DockerLogMonitor:
                     ctx.currently_configured = True
             # start monitoring containers that are in the config but not monitored yet
             for container in self.client.containers.list():
+                if not container or not container.id:
+                    continue
                 # Only start monitoring containers that are newly added to the config.yaml and not monitored yet
                 ctx = self._registry.get_by_id(container.id)
                 if not ctx or ctx.monitoring_stopped_event.is_set():
