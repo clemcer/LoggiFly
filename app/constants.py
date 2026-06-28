@@ -109,8 +109,7 @@ MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS = {
 SUPPORTED_CONTAINER_ACTIONS: tuple[str, ...] = tuple(action.value for action in Actions)
 SUPPORTED_CONTAINER_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
 
-
-BUFFERED_EVENT_SUFFIX = (
+BUFFERED_SUFFIX = (
     "{% if buffer_seconds|default(0, true)|int > 0 %}"
     " {{ buffer_count|default(1) }} "
     "{% if buffer_count|default(1)|int == 1 %}time{% else %}times{% endif %}"
@@ -118,19 +117,44 @@ BUFFERED_EVENT_SUFFIX = (
     "{% endif %}"
 )
 
+DEFAULT_LOG_MATCH_TITLE = (
+    "{% set count = keywords_list|default([], true)|length %}"
+    "{% if count == 1 %}"
+    "'{{ keywords_list[0] }}' was found" + BUFFERED_SUFFIX + " in {{ target_name }}"
+    "{% elif count == 2 %}"
+    "'{{ keywords_list[0] }}' and '{{ keywords_list[1] }}' were found in {{ target_name }}"
+    "{% elif count > 2 %}"
+    "The following keywords were found in {{ target_name }}: "
+    "{% for keyword in keywords_list %}"
+    "'{{ keyword }}'{% if not loop.last %}, {% endif %}"
+    "{% endfor %}"
+    "{% else %}"
+    "{{ target_name }}"
+    "{% endif %}"
+)
+
+DEFAULT_TITLE_WRAPPER = (
+    "{% if host_identifier %}[{{ host_identifier }}] - {% endif %}"
+    "{{ title }}"
+    "{% if container_action_result_message is not none %}"
+    " ({{ container_action_result_message }})"
+    "{% endif %}"
+)
+
+
 MAP_EVENT_TO_TITLE = {
-    "start":     "Container '{{ target_name }}' started" + BUFFERED_EVENT_SUFFIX,
-    "stop":      "Container '{{ target_name }}' stopped" + BUFFERED_EVENT_SUFFIX,
-    "die":       "Container '{{ target_name }}' exited" + BUFFERED_EVENT_SUFFIX,
-    "crash":     "Container '{{ target_name }}' crashed" + BUFFERED_EVENT_SUFFIX,
-    "destroy":   "Container '{{ target_name }}' removed" + BUFFERED_EVENT_SUFFIX,
-    "healthy":   "Container '{{ target_name }}' entered healthy state" + BUFFERED_EVENT_SUFFIX,
-    "unhealthy": "Container '{{ target_name }}' entered unhealthy state" + BUFFERED_EVENT_SUFFIX,
-    "starting":  "Container '{{ target_name }}' entered starting state" + BUFFERED_EVENT_SUFFIX,
-    "oom":       "OOM event for container '{{ target_name }}'" + BUFFERED_EVENT_SUFFIX,
-    "kill":      "Container '{{ target_name }}' was killed" + BUFFERED_EVENT_SUFFIX,
-    "create":    "Container '{{ target_name }}' was created" + BUFFERED_EVENT_SUFFIX,
-    "restart":   "Container '{{ target_name }}' was restarted" + BUFFERED_EVENT_SUFFIX,
+    "start":     "Container '{{ target_name }}' started" + BUFFERED_SUFFIX,
+    "stop":      "Container '{{ target_name }}' stopped" + BUFFERED_SUFFIX,
+    "die":       "Container '{{ target_name }}' exited" + BUFFERED_SUFFIX,
+    "crash":     "Container '{{ target_name }}' crashed" + BUFFERED_SUFFIX,
+    "destroy":   "Container '{{ target_name }}' removed" + BUFFERED_SUFFIX,
+    "healthy":   "Container '{{ target_name }}' entered healthy state" + BUFFERED_SUFFIX,
+    "unhealthy": "Container '{{ target_name }}' entered unhealthy state" + BUFFERED_SUFFIX,
+    "starting":  "Container '{{ target_name }}' entered starting state" + BUFFERED_SUFFIX,
+    "oom":       "OOM event for container '{{ target_name }}'" + BUFFERED_SUFFIX,
+    "kill":      "Container '{{ target_name }}' was killed" + BUFFERED_SUFFIX,
+    "create":    "Container '{{ target_name }}' was created" + BUFFERED_SUFFIX,
+    "restart":   "Container '{{ target_name }}' was restarted" + BUFFERED_SUFFIX,
 }
 
 MAP_EVENT_TO_MESSAGE = {

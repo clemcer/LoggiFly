@@ -7,7 +7,10 @@ from typing import Dict, Optional, List, Any
 
 from jinja2 import Environment, Undefined
 
-from constants import NotificationType, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, MonitorType
+from constants import (
+    MonitorType, NotificationType,
+    DEFAULT_LOG_MATCH_TITLE, MAP_EVENT_TO_MESSAGE, MAP_EVENT_TO_TITLE, DEFAULT_TITLE_WRAPPER
+    )
 from monitoring.base import SourceMetadata
 
 logger = logging.getLogger(__name__)
@@ -57,28 +60,7 @@ def extract_fields_from_regex(log_line: str, regex: Optional[str]) -> Dict[str, 
     except Exception as e:
         logger.error(f"Unexpected error extracting fields from regex: {e}")
         return {}
-
-def default_title_for_log_match(
-    keywords_found: List[str],
-    target_name: str,
-) -> str:
-    """Preserve current default title semantics for log matches."""
-    if len(keywords_found) == 1:
-        title = f"'{keywords_found[0]}' found in {target_name}"
-    elif len(keywords_found) == 2:
-        joined = " and ".join(f"'{w}'" for w in keywords_found)
-        title = f"{joined} found in {target_name}"
-    elif len(keywords_found) > 2:
-        joined = ", ".join(f"'{w}'" for w in keywords_found)
-        title = f"The following keywords were found in {target_name}: {joined}"
-    else:
-        title = target_name
-    return title
-
-
-def fallback_title_for_event(target_name: str, event: Optional[str]) -> str:
-    return f"Event '{event}' for container {target_name}" if event else f"Event for container {target_name}"
-
+    
 
 @dataclass
 class NotificationContext:
@@ -107,7 +89,6 @@ class NotificationContext:
     signal: Optional[str] = None
 
     # buffer fields
-    # TODO: Pass these separately or pass whole trigger_context?
     buffer_count: Optional[int] = None
     buffer_seconds: Optional[int] = None
 
@@ -242,24 +223,19 @@ def render_title(
     # Default when no template is provided
     if not title:
         if ctx.notification_type == NotificationType.LOG_MATCH:
-            title = default_title_for_log_match(ctx.keywords_found, ctx.target_name)
+            title = _render_template(DEFAULT_LOG_MATCH_TITLE, context_dict).strip()
         elif ctx.notification_type == NotificationType.DOCKER_EVENT:
             if ctx.event:
                 logger.debug(f"Rendering title for event: {ctx.event} with template: {MAP_EVENT_TO_TITLE.get(ctx.event, '')}")
                 title = _render_template(MAP_EVENT_TO_TITLE.get(ctx.event, ""), context_dict)
                 if not title:
-                    title = fallback_title_for_event(ctx.target_name, ctx.event)
+                    title = f"Event '{ctx.event}' for container {ctx.target_name}" if ctx.event else f"Event for container {ctx.target_name}"
 
-        # Prepend host identifier to title (only exists for multi-host or swarm setups)
-        if ctx.host_identifier:
-            title = f"[{ctx.host_identifier}] - {title}"
-        if ctx.container_action_result_message is not None:
-            title = f"{title} ({ctx.container_action_result_message})"
+        # Prepend host identifier to title (only exists for multi-host or swarm setups) and append container action result
+        title = _render_template(DEFAULT_TITLE_WRAPPER, {**context_dict, "title": title},).strip()
 
-    # Safe fallback
     if not title:
         title = f"{ctx.target_name}: {context_dict.get('keywords') or context_dict.get('event')}"
-    # Append action result to title
     return title
 
 

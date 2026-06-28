@@ -336,7 +336,6 @@ class LogProcessor:
 
             found = self._match_keyword(log_line, keyword_dict)
             if found:
-
                 # Treat keywords with buffer_seconds setting separately
                 if should_buffer:
 
@@ -427,7 +426,7 @@ class LogProcessor:
                 if not l:
                     return
             lms.log_line = "\n".join(l)
-            self._process_log_match(lms)
+            self._process_log_match(lms, len(l))
 
         with self.log_match_buffer_lock:
             if not self.log_match_buffer.get(key):
@@ -438,16 +437,14 @@ class LogProcessor:
                 self.log_match_buffer[key].append(lms.log_line)
         return True
 
-    def _process_log_match(self, lms: LogMatchContext):
-        trigger_context = lms.trigger_context
-        keywords_found = lms.keywords_found
-        log_line = lms.log_line
-        keyword_level_config = lms.keyword_level_config
+    def _process_log_match(self, lms: LogMatchContext, buffer_count: int = 1):
         # TODO: maybe change logged message for buffered match?
-        formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(log_line.splitlines()) + "\n   -----------------------"
-        k = "keyword was found" if len(keywords_found) == 1 else "keywords were found"
-        self.logger.info(f"The following {k} in {self.target_name}: {keywords_found}."
-                    + (f" (A Log FIle will be attached)" if trigger_context.get("attach_logfile") else "")
+        bs = lms.trigger_context.get('buffer_seconds')
+        formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(lms.log_line.splitlines()) + "\n   -----------------------"
+        k = "keyword was found" if len(lms.keywords_found) == 1 else "keywords were found"
+        k = k + f" {buffer_count} time{'s' if isinstance(buffer_count, int) and buffer_count > 1 else ''} in {bs}s" if bs else ""
+        self.logger.info(f"The following {k} in {self.target_name}: {lms.keywords_found}."
+                    + (f" (A Log FIle will be attached)" if lms.trigger_context.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )
 
@@ -456,17 +453,19 @@ class LogProcessor:
             target_name=self.target_name,
             monitor_type=self.monitor_type,
             source_metadata=self.monitored_target.get_metadata(),
-            keywords_found=keywords_found,
-            log_line=log_line,
-            regex=keyword_level_config.get("regex"),
+            keywords_found=lms.keywords_found,
+            log_line=lms.log_line,
+            regex=lms.keyword_level_config.get("regex"),
             hostname=self.monitored_target.hostname,
             host_identifier=self.monitored_target.host_identifier,
-            trigger_on=keyword_level_config.get("trigger_on"),
+            trigger_on=lms.keyword_level_config.get("trigger_on"),
+            buffer_count=buffer_count,
+            buffer_seconds=bs
         )
         process_trigger(
             logger=self.logger,
             config=self.config,
-            trigger_context=trigger_context,
+            trigger_context=lms.trigger_context,
             monitored_target=self.monitored_target,
             notification_context=notification_context,
         )
