@@ -1,7 +1,6 @@
 import re
 import time
-import json
-from typing import Any, cast
+from typing import Any
 import threading
 from threading import Thread, Lock
 from dataclasses import dataclass
@@ -12,7 +11,7 @@ from constants import (
     NotificationType,
 )
 from notification_formatter import NotificationContext
-from utils import merge_trigger_context, merge_config_levels, TriggerTracker
+from utils import merge_trigger_context, merge_config_levels, TriggerTracker, make_buffer_match_key
 from trigger import process_trigger
 from config.models import RootConfig
 from monitoring import MonitoredTarget, EffectiveTargetConfig
@@ -376,7 +375,7 @@ class LogProcessor:
                 if not self._passes_trigger_on(keyword_dict, tracker_key):
                     continue
 
-                self.keyword_tracker.restart_trigger_cooldown(tracker_key)                
+                self.keyword_tracker.restart_trigger_cooldown(tracker_key)
                 merge_matches = self._get_keyword_setting(keyword_dict, "merge_matches", False)
                 if merge_matches:
                     # with merge_matches enabled, all found keywords only trigger once
@@ -406,16 +405,8 @@ class LogProcessor:
                 )
             self._process_log_match(lms)
     
-    def _make_buffer_match_key(self, keyword_level_config: dict) -> str:
-        return json.dumps(
-            {"keyword_level_config": keyword_level_config},
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str
-        )
-
     def _try_append_to_existing_buffer(self, keyword_level_config: dict, log_line) -> bool:
-        key = self._make_buffer_match_key(keyword_level_config)
+        key = make_buffer_match_key(keyword_level_config)
         with self.log_match_buffer_lock:
           if key not in self.log_match_buffer:
               return False
@@ -424,7 +415,7 @@ class LogProcessor:
         
     def _start_match_buffer(self, lms: LogMatchContext):
         bs = lms.trigger_context["buffer_seconds"]
-        key = self._make_buffer_match_key(lms.keyword_level_config)
+        key = make_buffer_match_key(lms.keyword_level_config)
         
         def clear():
             self.logger.debug(f"Clear log match buffer called. clearing in {bs}")

@@ -106,6 +106,11 @@ class NotificationContext:
     exit_code: Optional[int] = None
     signal: Optional[str] = None
 
+    # buffer fields
+    # TODO: Pass these separately or pass whole trigger_context?
+    buffer_count: Optional[int] = None
+    buffer_seconds: Optional[int] = None
+
     # action fields
     container_action_type: Optional[str] = None
     container_action_string: Optional[str] = None
@@ -182,6 +187,9 @@ class NotificationContext:
             "event": self.event,
             "exit_code": self.exit_code,
             "signal": self.signal,
+
+            "buffer_count": self.buffer_count,
+            "buffer_seconds": self.buffer_seconds,
 
             "container_action_type": self.container_action_type,
             "container_action_string": self.container_action_string,

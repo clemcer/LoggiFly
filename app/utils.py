@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import logging
 import os
+import json
 from threading import Lock
 import time
 from typing import Literal
@@ -188,3 +189,12 @@ def convert_to_int(val, fallback_value: int = 0, min_value: int = 0) -> int:
         return val
     except (ValueError, TypeError):
         return fallback_value
+    
+
+def make_buffer_match_key(trigger_config: dict) -> str:
+    return json.dumps(
+        {"trigger_config": trigger_config},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str
+    )

@@ -110,19 +110,27 @@ SUPPORTED_CONTAINER_ACTIONS: tuple[str, ...] = tuple(action.value for action in 
 SUPPORTED_CONTAINER_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
 
 
+BUFFERED_EVENT_SUFFIX = (
+    "{% if buffer_seconds|default(0, true)|int > 0 %}"
+    " {{ buffer_count|default(1) }} "
+    "{% if buffer_count|default(1)|int == 1 %}time{% else %}times{% endif %}"
+    " within {{ buffer_seconds }}s"
+    "{% endif %}"
+)
+
 MAP_EVENT_TO_TITLE = {
-    "start":    "Container '{{ target_name }}' started",
-    "stop":     "Container '{{ target_name }}' stopped",
-    "die":      "Container '{{ target_name }}' exited",
-    "crash":    "Container '{{ target_name }}' crashed",
-    "destroy":  "Container '{{ target_name }}' removed",
-    "healthy":  "Container '{{ target_name }}' is healthy",
-    "unhealthy":"Container '{{ target_name }}' is unhealthy",
-    "starting": "Container '{{ target_name }}' is starting",
-    "oom":      "OOM event for container '{{ target_name }}'",
-    "kill":     "Container '{{ target_name }}' was killed",
-    "create":   "Container '{{ target_name }}' was created",
-    "restart":  "Container '{{ target_name }}' was restarted",
+    "start":     "Container '{{ target_name }}' started" + BUFFERED_EVENT_SUFFIX,
+    "stop":      "Container '{{ target_name }}' stopped" + BUFFERED_EVENT_SUFFIX,
+    "die":       "Container '{{ target_name }}' exited" + BUFFERED_EVENT_SUFFIX,
+    "crash":     "Container '{{ target_name }}' crashed" + BUFFERED_EVENT_SUFFIX,
+    "destroy":   "Container '{{ target_name }}' removed" + BUFFERED_EVENT_SUFFIX,
+    "healthy":   "Container '{{ target_name }}' entered healthy state" + BUFFERED_EVENT_SUFFIX,
+    "unhealthy": "Container '{{ target_name }}' entered unhealthy state" + BUFFERED_EVENT_SUFFIX,
+    "starting":  "Container '{{ target_name }}' entered starting state" + BUFFERED_EVENT_SUFFIX,
+    "oom":       "OOM event for container '{{ target_name }}'" + BUFFERED_EVENT_SUFFIX,
+    "kill":      "Container '{{ target_name }}' was killed" + BUFFERED_EVENT_SUFFIX,
+    "create":    "Container '{{ target_name }}' was created" + BUFFERED_EVENT_SUFFIX,
+    "restart":   "Container '{{ target_name }}' was restarted" + BUFFERED_EVENT_SUFFIX,
 }
 
 MAP_EVENT_TO_MESSAGE = {
