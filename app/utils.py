@@ -46,7 +46,7 @@ class TriggerTracker:
         """
         Record a trigger match (log match or container event) and determine whether to trigger.
 
-        Without trigger_on: triggers immediately (returns True) and stores the current time.
+        Without trigger_on: triggers immediately (returns True).
         With trigger_on: adds the timestamp to a sliding window and only triggers
         when `count` matches have occurred within the last `timeframe` seconds.
         On trigger the match history is cleared so the count starts fresh.
@@ -77,17 +77,6 @@ class TriggerTracker:
             self.logger.debug(f"{self._trigger_type} '{key}' matched {len(history)} times in the last {timeframe} seconds. {count - len(history)} more matches needed to trigger.")
 
             return False
-
-    def record_match(self, key: str | tuple, trigger_on: dict | None) -> bool:
-        """
-        Backward-compatible wrapper: record a match and mark the trigger as fired
-        when it should trigger immediately.
-        """
-        # TODO: keep this for legacy or refactor docker_monitor?
-        should_fire = self.record_trigger_on_match(key, trigger_on)
-        if should_fire:
-            self.restart_trigger_cooldown(key)
-        return should_fire
 
 
 def get_env_var(key: str, prefix: str = "LOGGIFLY_", fallback_value: str | None = None) -> str | None:

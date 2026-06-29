@@ -338,7 +338,6 @@ class LogProcessor:
             if found:
                 # Treat keywords with buffer_seconds setting separately
                 if should_buffer:
-
                     if self._is_ignored_match(self.target_config_dict.get("ignore_keywords") or [], log_line):
                         return
                     if self._is_ignored_match(keyword_dict.get("ignore_keywords") or [], log_line):
@@ -360,10 +359,8 @@ class LogProcessor:
                         keywords_found=[found],
                         log_line=log_line
                         )
-                    # mark as triggered when first entry is added to buffer
-                    self.keyword_tracker.restart_trigger_cooldown(tracker_key)
                     self.logger.info(f"'{found}' was found in a log line but has 'buffer_seconds' configured. Log line will go into buffer and only trigger in {buffer_seconds}s")
-                    self._start_match_buffer(lms)
+                    self._start_match_buffer(lms, tracker_key)
                     continue
                 
                 if self._is_ignored_match(self.target_config_dict.get("ignore_keywords") or [], log_line):
@@ -412,7 +409,7 @@ class LogProcessor:
           self.log_match_buffer[key].append(log_line)
           return True
         
-    def _start_match_buffer(self, lms: LogMatchContext):
+    def _start_match_buffer(self, lms: LogMatchContext, tracker_key: str | tuple):
         bs = lms.trigger_context["buffer_seconds"]
         key = make_buffer_match_key(lms.keyword_level_config)
         
@@ -426,23 +423,23 @@ class LogProcessor:
                 if not l:
                     return
             lms.log_line = "\n".join(l)
+            self.keyword_tracker.restart_trigger_cooldown(tracker_key)
             self._process_log_match(lms, len(l))
 
         with self.log_match_buffer_lock:
             if not self.log_match_buffer.get(key):
                 self.log_match_buffer[key] = [lms.log_line]
-                clear_thread = Thread(target=clear, daemon=True)
-                clear_thread.start()
             else:
                 self.log_match_buffer[key].append(lms.log_line)
-        return True
+                return
+        clear_thread = Thread(target=clear, daemon=True)
+        clear_thread.start()
 
     def _process_log_match(self, lms: LogMatchContext, buffer_count: int = 1):
-        # TODO: maybe change logged message for buffered match?
         bs = lms.trigger_context.get('buffer_seconds')
         formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(lms.log_line.splitlines()) + "\n   -----------------------"
         k = "keyword was found" if len(lms.keywords_found) == 1 else "keywords were found"
-        k = k + f" {buffer_count} time{'s' if isinstance(buffer_count, int) and buffer_count > 1 else ''} in {bs}s" if bs else ""
+        k = k + f" {buffer_count} times in {bs}s" if isinstance(buffer_count, int) and buffer_count > 1 else ""
         self.logger.info(f"The following {k} in {self.target_name}: {lms.keywords_found}."
                     + (f" (A Log FIle will be attached)" if lms.trigger_context.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"

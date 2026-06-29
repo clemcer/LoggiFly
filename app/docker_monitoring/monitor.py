@@ -750,6 +750,7 @@ class DockerLogMonitor:
                 if not t or not isinstance(t, int):
                     self.logger.error(f"Unexpected error clearing docker event buffer for buffer_seconds. Value for key '{key}' is not positive integer: {t}")
                     return
+            emc.container_context.event_trigger_tracker.restart_trigger_cooldown(emc.event_type)
             self._trigger_matched_event(emc, buffer_count=t)
 
         with buffer_lock:
@@ -795,7 +796,7 @@ class DockerLogMonitor:
             return
 
         trigger_on = trigger_level_config.get("trigger_on")
-        if ctx.event_trigger_tracker.record_match(event_type, trigger_on):
+        if ctx.event_trigger_tracker.record_trigger_on_match(event_type, trigger_on):
             self.logger.info(f"Event '{event_type}' for container '{ctx.target_name}' triggered. Processing trigger.")
         else:
             self.logger.debug(f"Event '{event_type}' for container '{ctx.target_name}' not triggered. Skipping trigger.")
@@ -804,6 +805,7 @@ class DockerLogMonitor:
         if should_buffer and buffer_key:
             self._start_event_buffer(buffer_seconds, buffer_key, emc)
         else:
+            ctx.event_trigger_tracker.restart_trigger_cooldown(event_type)
             self._trigger_matched_event(emc)
 
     def _trigger_matched_event(self, emc: EventMatchContext, buffer_count: int = 1):
