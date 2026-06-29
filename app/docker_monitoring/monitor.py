@@ -20,7 +20,7 @@ from constants import (
     NotificationType,
     SUPPORTED_CONTAINER_ACTIONS,
 )
-from utils import convert_to_int, merge_trigger_context, get_env_var, TriggerTracker, is_true_env_var, make_buffer_match_key
+from utils import convert_to_int, merge_trigger_context, get_env_var, TriggerTracker, is_true_env_var, stringify_json
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.helpers import (
@@ -780,12 +780,21 @@ class DockerLogMonitor:
         trigger_context = merge_trigger_context(trigger_level_config, ctx.target_config_dict)
 
         emc = EventMatchContext(trigger_context, ctx, event, event_type)
-
-        buffer_seconds = trigger_context.get("buffer_seconds", 0)
+        
+        buffer_config = trigger_context.get("buffer") or {}
+        buffer_seconds = buffer_config.get("seconds", 0)
         should_buffer = bool(isinstance(buffer_seconds, int) and buffer_seconds > 0)
         buffer_key = None
         if should_buffer:
-            buffer_key = make_buffer_match_key(trigger_level_config)
+            if buffer_config.get("mode", "matching") == "all":
+                self.logger.warning(
+                    "'buffer.mode: all' is not supported for container event triggers "
+                    f"({ctx.target_name}, event: {event_type}). Using 'buffer.mode: matching' instead."
+                )
+            buffer_key = stringify_json({
+                "trigger_context": trigger_context,
+                "event": event_type 
+            })
             if self._try_increment_existing_buffer(buffer_key, emc):
                 return
 
@@ -827,7 +836,7 @@ class DockerLogMonitor:
             signal=signal,
             trigger_on=emc.trigger_context.get("trigger_on"),
             buffer_count=buffer_count,
-            buffer_seconds=emc.trigger_context.get("buffer_seconds")
+            buffer_seconds=(emc.trigger_context.get("buffer") or {}).get("seconds")
         )
         process_trigger(
             logger=self.logger,

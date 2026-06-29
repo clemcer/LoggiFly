@@ -114,6 +114,7 @@ def merge_with_precedence(
     keys: list[str] | tuple[str, ...] | None = None,
     list_union: bool = True,
     dict_merge: bool = True,
+    atomic_keys: set[str] | None = None
 ) -> dict:
     """
     Generic precedence merge helper used for modular settings and notifications.
@@ -121,6 +122,7 @@ def merge_with_precedence(
     """
     precedence = precedence or {}
     fallback = fallback or {}
+    atomic_keys = atomic_keys or set()
     considered_keys = keys if keys is not None else set(precedence.keys()) | set(fallback.keys())
     merged: dict = {}
 
@@ -130,11 +132,19 @@ def merge_with_precedence(
 
         if p_val is None:
             val = f_val
+        elif key in atomic_keys:
+            val = p_val
         else:
             if list_union and isinstance(p_val, list) and isinstance(f_val, list):
                 val = _union_lists(f_val, p_val) # in v2 last override first
             elif dict_merge and isinstance(p_val, dict) and isinstance(f_val, dict):
-                val = merge_with_precedence(p_val, f_val, list_union=list_union, dict_merge=dict_merge)
+                val = merge_with_precedence(
+                    p_val, 
+                    f_val,
+                    list_union=list_union,
+                    dict_merge=dict_merge,
+                    atomic_keys=atomic_keys
+                )
             else:
                 val = p_val
 
@@ -144,13 +154,19 @@ def merge_with_precedence(
     return merged
 
 
-def merge_config_levels(precedence: dict, fallback: dict, possible_keys: list[str] | tuple[str, ...] | None = None) -> dict:
+def merge_config_levels(
+        precedence: dict,
+        fallback: dict,
+        possible_keys: list[str] | tuple[str, ...] | None = None,
+        atomic_keys: set[str] | None = None
+) -> dict:
     return merge_with_precedence(
         precedence, 
         fallback, 
         keys=possible_keys, 
         list_union=True, 
         dict_merge=True,
+        atomic_keys=atomic_keys
     )
     
 
@@ -158,14 +174,24 @@ def merge_trigger_context(precedence: dict, fallback: dict) -> dict:
     """Wrapper that applies schema keys from ModularSettings."""
     from config.models.base import TriggerActionsBase
     possible_keys = tuple(TriggerActionsBase.model_fields.keys())
-    return merge_config_levels(precedence, fallback, possible_keys)
+    return merge_config_levels(
+        precedence,
+        fallback,
+        possible_keys,
+        atomic_keys=set({"buffer"})
+    )
 
 
 def merge_defaults(precedence: dict, fallback: dict) -> dict:
     """Merge defaults with precedence."""
     from config.models.base import RootDefaultsConfig
     possible_keys = tuple(RootDefaultsConfig.model_fields.keys())
-    return merge_config_levels(precedence, fallback, possible_keys)
+    return merge_config_levels(
+        precedence,
+        fallback,
+        possible_keys,
+        atomic_keys=set({"buffer"})
+    )
 
 
 def convert_to_int(val, fallback_value: int = 0, min_value: int = 0) -> int:
@@ -180,9 +206,9 @@ def convert_to_int(val, fallback_value: int = 0, min_value: int = 0) -> int:
         return fallback_value
     
 
-def make_buffer_match_key(trigger_config: dict) -> str:
+def stringify_json(trigger_config: dict) -> str:
     return json.dumps(
-        {"trigger_config": trigger_config},
+        trigger_config,
         sort_keys=True,
         separators=(",", ":"),
         default=str
