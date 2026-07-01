@@ -751,7 +751,7 @@ class DockerLogMonitor:
                     self.logger.error(f"Unexpected error clearing docker event buffer for buffer_seconds. Value for key '{key}' is not positive integer: {t}")
                     return
             emc.container_context.event_trigger_tracker.restart_trigger_cooldown(emc.event_type)
-            self._trigger_matched_event(emc, buffer_count=t)
+            self._trigger_matched_event(emc, buffer_match_count=t)
 
         with buffer_lock:
             self.logger.debug(f"Opened buffer for {emc.container_context.target_name} and event {emc.event_type}. Clearing in {buffer_seconds}s")
@@ -817,7 +817,7 @@ class DockerLogMonitor:
             ctx.event_trigger_tracker.restart_trigger_cooldown(event_type)
             self._trigger_matched_event(emc)
 
-    def _trigger_matched_event(self, emc: EventMatchContext, buffer_count: int = 1):
+    def _trigger_matched_event(self, emc: EventMatchContext, buffer_match_count: int = 1):
         exit_code = emc.event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
         signal = emc.event.get("Actor", {}).get("Attributes", {}).get("signal", None)
 
@@ -835,8 +835,8 @@ class DockerLogMonitor:
             exit_code=exit_code,
             signal=signal,
             trigger_on=emc.trigger_context.get("trigger_on"),
-            buffer_count=buffer_count,
-            buffer_seconds=(emc.trigger_context.get("buffer") or {}).get("seconds")
+            buffer_match_count=buffer_match_count,
+            buffer_elapsed_seconds=(emc.trigger_context.get("buffer") or {}).get("seconds")
         )
         process_trigger(
             logger=self.logger,

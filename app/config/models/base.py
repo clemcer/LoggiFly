@@ -192,7 +192,7 @@ class ActionCooldownMixin:
 class BufferConfig(BaseConfigModel):
     seconds: int = Field(ge=0, description="Number of seconds to buffer subsequent log lines.")
     mode: Literal["matching", "all"] = Field("matching", description="'matching' only captures matching log lines (default). 'all' captures all subsequent log lines")
-    max_lines: Optional[int] = Field(None, ge=0, description="Maximum number of lines to capture")
+    max_lines: Optional[int] = Field(None, ge=1, description="Maximum number of lines to capture")
 
 class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     """Optional overridable settings that can be applied at the container, rule, or keyword level."""
@@ -218,7 +218,6 @@ class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     disable_trigger_notifications: bool = Field(False, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: bool = Field(False, description="Combine multiple keyword matches from the same log entry into a single notification.")
     buffer: Optional[BufferConfig] = Field(None, description="Define buffering conditions to capture subsequent log lines")
-
 
 # ================================================
 # Notifications Config Models

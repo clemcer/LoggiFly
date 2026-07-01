@@ -89,8 +89,9 @@ class NotificationContext:
     signal: Optional[str] = None
 
     # buffer fields
-    buffer_count: Optional[int] = None
-    buffer_seconds: Optional[int] = None
+    buffer_match_count: Optional[int] = None
+    buffer_elapsed_seconds: Optional[int] = None
+    buffer_line_count: Optional[int] = None
 
     # action fields
     container_action_type: Optional[str] = None
@@ -169,8 +170,9 @@ class NotificationContext:
             "exit_code": self.exit_code,
             "signal": self.signal,
 
-            "buffer_count": self.buffer_count,
-            "buffer_seconds": self.buffer_seconds,
+            "buffer_count": self.buffer_match_count,
+            "buffer_elapsed_seconds": self.buffer_elapsed_seconds,
+            "buffer_line_count": self.buffer_line_count,
 
             "container_action_type": self.container_action_type,
             "container_action_string": self.container_action_string,
@@ -201,6 +203,7 @@ class NotificationContext:
 
         ctx: Dict[str, Any] = {}
         ctx.update(defaults)
+        ctx.setdefault("defaults", json.dumps(defaults, indent=2))
         ctx.update(regex_fields)
         ctx.update(json_fields)
         ctx["json"] = json_fields

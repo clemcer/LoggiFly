@@ -1,9 +1,10 @@
 import re
 import time
+import math
 from typing import Any
 import threading
 from threading import Thread, Lock
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from constants import (
     COMPILED_STRICT_PATTERNS,
@@ -27,6 +28,16 @@ class LogMatchContext:
 class BufferContext:
     lines: list[str]
     match_count: int
+    buffer_seconds: int
+    buffer_key: str
+    buffer_max_lines: int | None
+    log_match_context: LogMatchContext
+    tracker_key: str | tuple
+    timestamp: float
+    buffer_elapsed_seconds: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.buffer_elapsed_seconds = self.buffer_seconds
 
 
 class LogProcessor:
@@ -64,7 +75,6 @@ class LogProcessor:
         self.monitor_type = monitored_target.monitor_type
         self.target_config = monitored_target.target_config
 
-        # buffer for buffer_seconds setting
         self.log_match_buffer = {}
         self.log_match_buffer_lock = Lock()
 
@@ -291,7 +301,7 @@ class LogProcessor:
                 f"{key}: {val}" for item in all_of for key, val in item.items()
             )
         raise AssertionError("keyword_dict has no keyword, regex or all_of")
-    
+
 
     def _is_ignored_match(self, ignore_keywords: list, log_line) -> bool:
         for keyword in ignore_keywords:
@@ -300,22 +310,6 @@ class LogProcessor:
                 self.logger.debug(f"ignore_keywords '{ignored_match}' was found in log line {log_line[:75]}...")
                 return True
         return False
-
-    def _is_on_cooldown(self, keyword_dict, tracker_key) -> bool:
-        if self.keyword_tracker.is_on_cooldown(
-            tracker_key, 
-            self._get_keyword_setting(keyword_dict, "trigger_cooldown", 10)
-            ):
-            return True
-        return False
-    
-    def _passes_trigger_on(self, keyword_dict, tracker_key) -> bool:
-        if not self.keyword_tracker.record_trigger_on_match(
-            tracker_key,
-            keyword_dict.get("trigger_on")
-            ):
-            return False 
-        return True
 
     def _search_and_process(self, log_line: str):
         """
@@ -341,31 +335,31 @@ class LogProcessor:
                 "trigger_config": keyword_dict
             }) if should_buffer else None
 
-            # Cooldown of keywords with buffer_seconds are checked separately and not always
-            if not should_buffer and self.keyword_tracker.is_on_cooldown(
-                tracker_key, 
-                self._get_keyword_setting(keyword_dict, "trigger_cooldown", 10)
-                ):
+            trigger_on = keyword_dict.get("trigger_on")
+            trigger_cooldown = self._get_keyword_setting(keyword_dict, "trigger_cooldown", 10)
+
+            # Cooldown of keywords with buffer setting are checked separately and not always
+            if not should_buffer and self.keyword_tracker.is_on_cooldown(tracker_key, trigger_cooldown):
                 continue
 
             found = self._match_keyword(log_line, keyword_dict)
             if found:
-                # Treat keywords with buffer_seconds setting separately
+                # Treat keywords with buffer setting separately
                 if should_buffer and buffer_key:
                     if self._is_ignored_match(self.target_config_dict.get("ignore_keywords") or [], log_line):
                         return
                     if self._is_ignored_match(keyword_dict.get("ignore_keywords") or [], log_line):
                         continue
                     
-                    if self._try_append_to_existing_buffer(buffer_key, log_line, matching=True, max_lines=buffer_max_lines):
+                    if self._try_append_to_existing_buffer(buffer_key, log_line, matching=True):
                         self.logger.debug(f"Keyword: {found} going into buffer")
                         already_buffered = True
                         continue
                     
                     # for first match in buffer we check cooldown and trigger_on
-                    if self._is_on_cooldown(keyword_dict, tracker_key):
+                    if self.keyword_tracker.is_on_cooldown(tracker_key, trigger_cooldown):
                         continue
-                    if not self._passes_trigger_on(keyword_dict, tracker_key):
+                    if not self.keyword_tracker.record_trigger_on_match(tracker_key, trigger_on):
                         continue
 
                     lms = LogMatchContext(
@@ -374,8 +368,18 @@ class LogProcessor:
                         keywords_found=[found],
                         log_line=log_line
                         )
-                    self.logger.info(f"'{found}' was found in a log line but has 'buffer_seconds' configured. Log line will go into buffer and only trigger in {buffer_seconds}s")
-                    self._start_match_buffer(buffer_key, lms, tracker_key)
+                    self.logger.info(f"'{found}' was found in a log line but has 'buffer' configured. Log line will go into buffer and only trigger in {buffer_seconds}s")
+                    bc = BufferContext(
+                        lines=[log_line],
+                        match_count=1,
+                        buffer_seconds=buffer_seconds,
+                        buffer_max_lines=buffer_max_lines,
+                        buffer_key=buffer_key,
+                        log_match_context=lms,
+                        tracker_key=tracker_key,
+                        timestamp=time.monotonic()
+                    )
+                    self._start_match_buffer(bc)
                     already_buffered = True
                     continue
                 
@@ -384,7 +388,7 @@ class LogProcessor:
                 if self._is_ignored_match(keyword_dict.get("ignore_keywords") or [], log_line):
                     continue
 
-                if not self._passes_trigger_on(keyword_dict, tracker_key):
+                if not self.keyword_tracker.record_trigger_on_match(tracker_key, trigger_on):
                     continue
 
                 self.keyword_tracker.restart_trigger_cooldown(tracker_key)
@@ -409,8 +413,7 @@ class LogProcessor:
 
             if not already_buffered:
                 if buffer_config and buffer_config.get("mode", "matching") == "all" and buffer_key:
-                    max_lines = buffer_config.get("max_lines", None)
-                    self._try_append_to_existing_buffer(buffer_key, log_line, matching=False, max_lines=max_lines)
+                    self._try_append_to_existing_buffer(buffer_key, log_line, matching=False)
 
         if keywords_found:
             trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
@@ -421,50 +424,67 @@ class LogProcessor:
                 log_line=log_line
                 )
             self._process_log_match(lms)
-    
-    def _try_append_to_existing_buffer(self, key: str, log_line, matching: bool, max_lines: int | None = None) -> bool:
-        with self.log_match_buffer_lock:
-          if key not in self.log_match_buffer:
-              return False
-          ctx: BufferContext = self.log_match_buffer[key]
-          if max_lines and len(ctx.lines) >= max_lines:
-              return False
-          ctx.lines.append(log_line)
-          if matching:
-              ctx.match_count += 1
-          return True
-        
-    def _start_match_buffer(self, buffer_key: str, lms: LogMatchContext, tracker_key: str | tuple):
-        bs = lms.trigger_context["buffer"]["seconds"]
-        
-        def clear():
-            self.logger.debug(f"Clear log match buffer called. clearing in {bs}")
-            stopped = self.target_stop_event.wait(bs)
-            if stopped:
-                self.logger.debug("Flushing log match buffer because monitoring stopped")
-            with self.log_match_buffer_lock:
-                ctx: BufferContext = self.log_match_buffer.pop(buffer_key)
-                if not ctx:
-                    return
-            lms.log_line = "\n".join(ctx.lines)
-            self.keyword_tracker.restart_trigger_cooldown(tracker_key)
-            self._process_log_match(lms, ctx.match_count)
 
+    def _try_append_to_existing_buffer(self, key: str, log_line: str, matching: bool) -> bool:
         with self.log_match_buffer_lock:
-            if not self.log_match_buffer.get(buffer_key):
-                self.log_match_buffer[buffer_key] = BufferContext([lms.log_line], 1)
-            else:
-                self.log_match_buffer[buffer_key].lines.append(lms.log_line)
+            if key not in self.log_match_buffer:
+                return False
+            ctx: BufferContext = self.log_match_buffer[key]
+            ctx.lines.append(log_line)
+            if matching:
+                ctx.match_count += 1
+            should_flush = ctx.buffer_max_lines and len(ctx.lines) >= ctx.buffer_max_lines
+        if should_flush:
+            self.logger.debug(
+                f"Flushing log match buffer for {self.target_name} because max_lines={ctx.buffer_max_lines} was reached"
+            )
+            self._flush_match_buffer(ctx)
+        return True
+    
+    def _flush_match_buffer(self, buffer_context: BufferContext):
+        with self.log_match_buffer_lock:
+            ctx: BufferContext | None = self.log_match_buffer.get(buffer_context.buffer_key)
+            if not ctx or ctx is not buffer_context:
+                self.logger.debug(f"Match buffer was already flushed, probably due to max_lines. Not flushing.") # TODO: remove
                 return
-        clear_thread = Thread(target=clear, daemon=True)
+            self.log_match_buffer.pop(buffer_context.buffer_key, None)
+
+        lms = buffer_context.log_match_context
+        lms.log_line = "\n".join(ctx.lines)
+        self.keyword_tracker.restart_trigger_cooldown(buffer_context.tracker_key)
+        elapsed = max(1, math.ceil(time.monotonic() - ctx.timestamp))
+        ctx.buffer_elapsed_seconds = min(ctx.buffer_seconds, elapsed)
+        self._process_log_match(lms, ctx)
+
+    def _wait_for_buffer_flush(self, buffer_context: BufferContext):
+        self.logger.debug(f"Buffer timer started for '{buffer_context.tracker_key}', waiting {buffer_context.buffer_seconds}s")
+        stopped = self.target_stop_event.wait(buffer_context.buffer_seconds)
+        if stopped:
+            self.logger.debug("Flushing log match buffer because monitoring stopped")
+        self._flush_match_buffer(buffer_context)
+
+    def _start_match_buffer(self, buffer_context: BufferContext):
+        should_flush = False
+        with self.log_match_buffer_lock:
+            if not self.log_match_buffer.get(buffer_context.buffer_key):
+                self.log_match_buffer[buffer_context.buffer_key] = buffer_context
+                should_flush = buffer_context.buffer_max_lines == 1
+            else:
+                self.logger.debug(f"Unexpected error: Buffer already exists for {buffer_context.tracker_key}. Not buffering...")
+                return
+        if should_flush:
+            return self._flush_match_buffer(buffer_context)
+        clear_thread = Thread(target=self._wait_for_buffer_flush, args=(buffer_context,), daemon=True)
         clear_thread.start()
 
-    def _process_log_match(self, lms: LogMatchContext, buffer_count: int = 1):
-        buffer_config = lms.trigger_context.get("buffer") or {}
-        bs = buffer_config.get("seconds", 0)
-        formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(lms.log_line.splitlines()) + "\n   -----------------------"
+    def _process_log_match(self, lms: LogMatchContext, buffer_context: BufferContext | None = None):
+        bes = buffer_context.buffer_elapsed_seconds if buffer_context else None
+        buffer_match_count = buffer_context.match_count if buffer_context else None
+        formatted_log_entry = (
+            "\n  -----  LOG-ENTRY  -----\n"  + ' | ' + '\n | '.join(lms.log_line.splitlines()) + "\n   -----------------------"
+        )
         k = "keyword was found" if len(lms.keywords_found) == 1 else "keywords were found"
-        k = k + (f" {buffer_count} times in {bs}s" if isinstance(buffer_count, int) and buffer_count > 1 else "")
+        k = k + (f" {buffer_match_count} times in {bes}s" if buffer_match_count and buffer_match_count > 1 else "")
         # TODO; was found in n log lines?
         self.logger.info(f"The following {k} in {self.target_name}: {lms.keywords_found}."
                     + (f" (A Log FIle will be attached)" if lms.trigger_context.get("attach_logfile") else "")
@@ -482,8 +502,9 @@ class LogProcessor:
             hostname=self.monitored_target.hostname,
             host_identifier=self.monitored_target.host_identifier,
             trigger_on=lms.keyword_level_config.get("trigger_on"),
-            buffer_count=buffer_count,
-            buffer_seconds=bs
+            buffer_match_count=buffer_match_count,
+            buffer_elapsed_seconds=buffer_context.buffer_elapsed_seconds if buffer_context else None,
+            buffer_line_count=len(buffer_context.lines) if buffer_context else 1
         )
         process_trigger(
             logger=self.logger,
