@@ -170,7 +170,7 @@ class NotificationContext:
             "exit_code": self.exit_code,
             "signal": self.signal,
 
-            "buffer_count": self.buffer_match_count,
+            "buffer_match_count": self.buffer_match_count,
             "buffer_elapsed_seconds": self.buffer_elapsed_seconds,
             "buffer_line_count": self.buffer_line_count,
 
