@@ -211,8 +211,9 @@ Controls what happens when **multiple keywords match in the same log line**.
 - **`merge_matches: true`**: all keywords matching the same log line that have `merge_matches: true` set (whether inherited or set on the keyword itself) are merged into one notification. Keywords that have `merge_matches: false` fire their own independent notification.
 
 ```yaml
-defaults:
-  merge_matches: true
+global:
+  defaults:
+    merge_matches: true
 
 containers:
   rules:
@@ -224,15 +225,59 @@ containers:
 
 `merge_matches` can be set at `defaults:`, source-level `defaults:`, rule level, or per-keyword. Setting it on individual keywords makes those keywords opt-in or opt-out of merging while others remain independent.
 
+
+### Buffering triggers
+Sometimes a keyword is found but you may want LoggiFly to wait and collect subsequent log lines for a specified number of seconds. 
+This can be done with the `buffer` setting.
+
+::: info
+the `buffer` setting explicitly opts you out of `merge_matches: true` if you have that configured.
+:::
+
+```yaml
+containers:
+  rules:
+    - container_name: my-app
+      keywords:
+        - keyword: error
+          buffer:
+            seconds: 10
+            mode: matching # optional, defaults to 'matching'
+            max_lines: # optional
+global:
+  defaults:
+    # it is recommended to configure buffers explicitly for specific triggers 
+    # but if you want it to apply to all triggers you can set it here as well (or under containers or a rule)
+    buffer:
+      seconds: 10
+```
+
+| Buffer option | Description |
+|-------|-------------------|
+| `seconds` | Required. Number of seconds to buffer subsequent log lines before triggering and sending the notification. |
+| `mode` | One of `matching` or `all`. `matching` collects only subsequent log lines that match the same keyword. `all` collects all subsequent log lines. Default is `matching`. |
+| `max_lines` | Optional. Maximum number of buffered lines to capture, including the first matching line. When this limit is reached, the buffer is flushed and the notification is sent immediately. |
+
+
+::: info
+You can also set `buffer.seconds` for `container_events`, but `mode` is always treated as `matching` and `max_lines` does not apply. Event buffering counts repeated occurrences of the same configured container event during the specified number of seconds and exposes that count in the notification title and the `buffer_match_count` template field.
+:::
+
+::: tip
+You can find the supported template fields for this feature [here](../customize-notifications/index.md#always-available-template-fields).
+:::
+
+
 ### `ignore_keywords`
 
 Keywords or regex patterns that suppress a trigger when found in the same log line.
 
 ::: details Can be set at multiple levels
 ```yaml
-defaults:
-  ignore_keywords:
-    - regex: "debug.*message"
+global:
+  defaults:
+    ignore_keywords:
+      - regex: "debug.*message"
 containers:
   rules:
     - container_name: my-app

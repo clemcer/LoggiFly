@@ -65,6 +65,22 @@ global:
     # per keyword match (false, default) or merge into one notification (true).
     merge_matches: false
 
+    # Buffer before triggering (optional)
+    buffer:
+      # Required. When a keyword is found, wait and collect subsequent log lines for this
+      # many seconds before sending the notification.
+      seconds: 0
+
+      # Optional, default is "matching"
+      # "matching" = only include log lines that match a keyword in the buffer.
+      # "all" = include all log lines in the buffer, even if they don't match.
+      mode: matching
+
+      # Optional. Maximum number of log lines to include in the buffer.
+      max_lines: 10
+
+
+
     # Keywords/patterns that are always ignored at every level.
     # Accepts plain strings, { keyword: ... }, and { regex: ... }.
     # Combined with ignore_keywords from all other levels.
@@ -326,6 +342,12 @@ containers:
             count: 5               # must be >= 2
             timeframe: 60          # seconds, must be >= 1
           title_template: "{{ trigger_on_count }} timeouts in {{ trigger_on_timeframe }}s"
+
+        - keyword: "database error"
+          buffer:
+            seconds: 15
+            mode: matching
+            max_lines: 10
 
         # ignore_keywords per keyword: suppress this trigger if these patterns also match
         - keyword: error
