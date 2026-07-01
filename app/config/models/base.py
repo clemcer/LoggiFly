@@ -23,6 +23,7 @@ from config.helpers import (
     validate_container_action,
     discriminate_keyword_type,
     validate_trigger_on,
+    validate_buffer_config
 )
 
 logger = logging.getLogger(__name__)
@@ -207,6 +208,10 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     merge_matches: Optional[bool] = Field(None, description="Combine multiple keyword matches from the same log entry into a single notification.")
     buffer: Optional[BufferConfig] = Field(None, description="Define buffering conditions to capture subsequent log lines")
 
+    @field_validator("buffer", mode="before")
+    def validate_buffer_config(cls, v):
+        return validate_buffer_config(v)
+
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     """Global default settings applied to all rules unless overridden at a lower level."""
     attach_logfile: bool = Field(False, description="Attach recent log lines as a file to the notification.")
@@ -218,6 +223,10 @@ class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     disable_trigger_notifications: bool = Field(False, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: bool = Field(False, description="Combine multiple keyword matches from the same log entry into a single notification.")
     buffer: Optional[BufferConfig] = Field(None, description="Define buffering conditions to capture subsequent log lines")
+
+    @field_validator("buffer", mode="before")
+    def validate_buffer_config(cls, v):
+        return validate_buffer_config(v)
 
 # ================================================
 # Notifications Config Models

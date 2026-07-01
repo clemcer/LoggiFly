@@ -378,6 +378,37 @@ def validate_trigger_on(v: Any) -> dict | None:
     return {"count": count, "timeframe": timeframe}
 
 
+def validate_buffer_config(v: Any) -> dict | None:
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        handle_error(f"buffer: Must be a dictionary with a required 'seconds' key. You set '{v}'.")
+        return None
+    mode = v.get("mode")
+    max_lines = v.get("max_lines")
+    try:
+        seconds = int(v["seconds"])
+    except Exception:
+        handle_error(f"buffer: seconds must be set and a valid integer. You set '{v}'.")
+        return None
+    if seconds < 0:
+        handle_error(f"buffer: seconds must be a valid, non-negative integer. You set '{v}'.")
+        return None
+    if max_lines is not None:
+        try:
+            max_lines = int(max_lines)
+        except Exception:
+            handle_error(f"buffer: max_lines must be a valid integer above 0. You set '{v}'.")
+            return None
+        if max_lines <= 0:
+            handle_error(f"buffer: max_lines must be a valid integer above 0. You set '{v}'.")
+            return None
+    if mode and mode not in ("matching", "all"):
+        handle_error(f"buffer: mode must be 'matching' or 'all'. You set '{v}'.")
+        return None
+    return v
+
+
 def validate_and_generate_ids(data: Any, source_name: str) -> Any:
 
     def _process_items(items: list[dict], prefix: str, label: str, seen: set[str]):

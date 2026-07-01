@@ -225,7 +225,7 @@ def load_config(path: str = CONFIG_PATH):
             error_message = (
                 f"Config validation failed: {format_pydantic_error(e)} (Enable Debug Logging (via env) to see full pydantic error)\n"
                 "You can also set the environment variable STRICT_CONFIG to false to ignore (most) validation errors and only log warnings instead. "
-                "However this means that the parts of the config causing the error might get ignored and not applied.  You should always double check for any warnings if you decide to do this."
+                "However this means that the parts of the config causing the error might get ignored and not applied. You should always double check for any warnings if you decide to do this."
                 )
 
         raise ConfigLoadError(error_message)
