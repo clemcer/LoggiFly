@@ -349,7 +349,6 @@ class LogProcessor:
             ignore_keywords = (self.target_config_dict.get("ignore_keywords") or []) + (keyword_dict.get("ignore_keywords") or [])
             is_ignored = self._is_ignored_match(ignore_keywords, log_line)
             if is_ignored:
-                self.logger.debug
                 if buffer_mode == "all" and buffer_key:
                     self._try_append_to_existing_buffer(buffer_key, log_line, matching=False)
                 continue
@@ -414,7 +413,7 @@ class LogProcessor:
                     log_line=log_line
                     )
                 self._process_log_match(lms)
-
+                
         if keywords_found:
             trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
             lms = LogMatchContext(

@@ -9,6 +9,7 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
+ATOMIC_CONFIG_KEYS = {"buffer"}
 
 @dataclass
 class LogAttachment:
@@ -169,7 +170,7 @@ def merge_config_levels(
         keys=possible_keys, 
         list_union=True, 
         dict_merge=True,
-        atomic_keys=atomic_keys
+        atomic_keys=ATOMIC_CONFIG_KEYS if atomic_keys is None else atomic_keys
     )
     
 
@@ -181,7 +182,7 @@ def merge_trigger_context(precedence: dict, fallback: dict) -> dict:
         precedence,
         fallback,
         possible_keys,
-        atomic_keys=set({"buffer"})
+        atomic_keys=ATOMIC_CONFIG_KEYS
     )
 
 
@@ -193,7 +194,7 @@ def merge_defaults(precedence: dict, fallback: dict) -> dict:
         precedence,
         fallback,
         possible_keys,
-        atomic_keys=set({"buffer"})
+        atomic_keys=ATOMIC_CONFIG_KEYS
     )
 
 
