@@ -46,7 +46,7 @@ def override_with_env(cnf: dict) -> dict:
         current[path[-1]] = value
 
 
-    skip_keys = ["NTFY_ACTIONS", "NTFY_HEADERS", "WEBHOOK_HEADERS", "SYSTEM_NOTIFICATIONS"]
+    skip_keys = ["NTFY_ACTIONS", "NTFY_HEADERS", "WEBHOOK_HEADERS", "SYSTEM_NOTIFICATIONS", "BUFFER"]
     list_keys = ["IGNORE_KEYWORDS"]
 
     notification_defaults_keys = [
