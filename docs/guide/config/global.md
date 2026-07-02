@@ -73,6 +73,20 @@ global:
     # per keyword match (false, default) or merge into one notification (true).
     merge_matches: false
 
+    # Buffer before triggering (optional)
+    buffer:
+      # Required. When a keyword is found, wait and collect subsequent log lines for this
+      # many seconds before sending the notification.
+      seconds: 0
+
+      # Optional, default is "matching"
+      # "matching" = only include log lines that match a keyword in the buffer.
+      # "all" = include all log lines in the buffer, even if they don't match.
+      mode: matching
+
+      # Optional. Maximum number of log lines to include in the buffer.
+      max_lines: 10
+
     # Keywords/patterns that suppress a trigger when found in the same log line.
     # Accepts plain strings, { keyword: ... }, and { regex: ... }.
     # Combined with ignore_keywords from all other levels.
@@ -133,8 +147,9 @@ global:
 | `hide_full_regex` | `false` | In notification titles, show only named capture group values instead of the full matched regex pattern. Useful for long or complex patterns. |
 | `regex_case_sensitive` | `true` | Whether `regex:` patterns are case-sensitive. Has no effect on `keyword:` items, which are always case-insensitive. |
 | `disable_trigger_notifications` | `false` | Suppress the notification when a trigger fires. Actions (container actions, OliveTin) are still executed. Useful for action-only workflows. |
-| `merge_matches` | `false` | When `false` (default), each matching keyword in a log line fires its own independent notification. When `true`, all matches from a single log line are merged into one notification (v1 behavior). |
-| `ignore_keywords` | — | Keywords or regex patterns that suppress a trigger when found in the same log line. Combined with ignore_keywords from all other levels. |
+| `merge_matches` | `false` | When `false` (default), each matching keyword in a log line fires its own independent notification. When `true`, all matches from a single log line are merged into one notification (v1 behavior). See [Merge Matches](./keywords-and-triggers.md#merge_matches). |
+| `buffer` | — | Optional buffering of log lines before sending a notification. See [Buffering triggers](./keywords-and-triggers.md#buffering-triggers). |
+| `ignore_keywords` | — | Keywords or regex patterns that suppress a trigger when found in the same log line. Combined with ignore_keywords from all other levels. See [Ignore Keywords](./keywords-and-triggers.md#ignore_keywords). |
 | `title_template` | — | Jinja2 template for the notification title. See [Customize Notifications](../customize-notifications/). |
 | `message_template` | — | Jinja2 template for the notification message body. See [Customize Notifications](../customize-notifications/). |
 | `ntfy_url` | — | ntfy server URL. |

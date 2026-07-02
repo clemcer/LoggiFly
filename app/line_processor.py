@@ -1,8 +1,10 @@
 import re
 import time
-from typing import Any, cast
+import math
+from typing import Any
 import threading
 from threading import Thread, Lock
+from dataclasses import dataclass, field
 
 from constants import (
     COMPILED_STRICT_PATTERNS,
@@ -10,10 +12,32 @@ from constants import (
     NotificationType,
 )
 from notification_formatter import NotificationContext
-from utils import merge_trigger_context, merge_config_levels, TriggerTracker
+from utils import merge_trigger_context, merge_config_levels, TriggerTracker, stringify_json
 from trigger import process_trigger
 from config.models import RootConfig
 from monitoring import MonitoredTarget, EffectiveTargetConfig
+
+@dataclass
+class LogMatchContext:
+    trigger_context: dict
+    keyword_level_config: dict
+    log_line: str
+    keywords_found: list
+
+@dataclass
+class BufferContext:
+    lines: list[str]
+    match_count: int
+    buffer_seconds: int
+    buffer_key: str
+    buffer_max_lines: int | None
+    log_match_context: LogMatchContext
+    tracker_key: str | tuple
+    timestamp: float
+    buffer_elapsed_seconds: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.buffer_elapsed_seconds = self.buffer_seconds
 
 
 class LogProcessor:
@@ -50,6 +74,9 @@ class LogProcessor:
         self.target_name = monitored_target.target_name
         self.monitor_type = monitored_target.monitor_type
         self.target_config = monitored_target.target_config
+
+        self.log_match_buffer = {}
+        self.log_match_buffer_lock = Lock()
 
         # Pattern detection state
         self.patterns = []
@@ -225,96 +252,242 @@ class LogProcessor:
         self.new_line_event.set()
 
 
-    def _search_keyword(self, log_line: str, keyword_dict: dict, ignore_keyword_time: bool = False) -> str | tuple | None:
+    ############################################################################
+    # Below is everything related to keyword matching, filtering and processing
+    ############################################################################
+
+    def _get_keyword_setting(self, keyword_dict: dict, key: str, default: Any = None) -> Any:
+        if keyword_dict.get(key) is not None:
+            return keyword_dict[key]
+        elif self.target_config_dict.get(key, None) is not None:
+            return self.target_config_dict[key]
+        return default
+
+    def _match_keyword(self, log_line: str, keyword_dict: dict) -> str | tuple | None:
         """
-        Search for keyword or regex in log_line. Enforce notification cooldown unless ignore_keyword_time is True.
-        For keywords with trigger_on config, matches are accumulated and only trigger
-        when the threshold count is reached within the timeframe.
+        Search for keyword or regex in log_line.
+
         Returns:
-            str or None: The matched keyword/regex or None if no match, on cooldown, or threshold not reached
+            str or tuple or None: The matched keyword/regex display value, or None if no match.
         """
-        def get_keyword_setting(key: str, default: Any = None) -> Any:
-            if keyword_dict.get(key) is not None:
-                return keyword_dict[key]
-            elif self.target_config_dict.get(key, None) is not None:
-                return self.target_config_dict[key]
-            return default
-
-        def make_group_key(items: tuple[dict]) -> tuple:
-            return tuple[str, ...](
-                f"{key}: {val}"for d in items for key, val in d.items()
-            )
-
-        trigger_cooldown = get_keyword_setting("trigger_cooldown", 10)
-        regex_case_sensitive = get_keyword_setting("regex_case_sensitive", False)
-        trigger_on = keyword_dict.get("trigger_on") if not ignore_keyword_time else None
-
+        regex_case_sensitive = self._get_keyword_setting(keyword_dict, "regex_case_sensitive", False)
         if regex := keyword_dict.get("regex"):
-            if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(regex, trigger_cooldown):
-                match = re.search(regex, log_line, re.IGNORECASE if not regex_case_sensitive else 0)
-                if match:
-                    if self.keyword_tracker.record_match(regex, trigger_on):
-                        hide_pattern = get_keyword_setting("hide_full_regex", False)
-                        return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
+            match = re.search(regex, log_line, re.IGNORECASE if not regex_case_sensitive else 0)
+            if match:
+                hide_pattern = self._get_keyword_setting(keyword_dict, "hide_full_regex", False)
+                return "Regex-Pattern" if hide_pattern else f"Regex: {regex}"
         elif keyword := keyword_dict.get("keyword"):
-            if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(keyword, trigger_cooldown):
-                if keyword.lower() in log_line.lower():
-                    if self.keyword_tracker.record_match(keyword, trigger_on):
-                        return keyword
+            if keyword.lower() in log_line.lower():
+                return keyword
         elif all_of := keyword_dict.get("all_of"):
-            key = make_group_key(all_of)
-            if ignore_keyword_time or not self.keyword_tracker.is_on_cooldown(key, trigger_cooldown):
-                all_matched = all(
-                    item["keyword"].lower() in log_line.lower() if item.get("keyword")
-                    else bool(re.search(item["regex"], log_line, re.IGNORECASE if not regex_case_sensitive else 0))
-                    for item in all_of
-                )
-                if all_matched and self.keyword_tracker.record_match(key, trigger_on):
-                    return key
+            all_matched = all(
+                item["keyword"].lower() in log_line.lower() if item.get("keyword")
+                else bool(re.search(item["regex"], log_line, re.IGNORECASE if not regex_case_sensitive else 0))
+                for item in all_of
+            )
+            if all_matched:
+                return self._keyword_tracker_key(keyword_dict)
         else:
-            self.logger.error(f"No keyword or regex found for {keyword_dict}")
+            self.logger.error(f"No keyword, regex or all_of found for {keyword_dict}")
         return None
+
+    def _keyword_tracker_key(self, keyword_dict: dict) -> str | tuple:
+        if regex := keyword_dict.get("regex"):
+            return regex
+        if keyword := keyword_dict.get("keyword"):
+            return keyword
+        if all_of := keyword_dict.get("all_of"):
+            return tuple(
+                f"{key}: {val}" for item in all_of for key, val in item.items()
+            )
+        raise AssertionError("keyword_dict has no keyword, regex or all_of")
+
+
+    def _is_ignored_match(self, ignore_keywords: list, log_line) -> bool:
+        for keyword in ignore_keywords:
+            ignored_match = self._match_keyword(log_line, keyword)
+            if ignored_match:
+                self.logger.debug(f"ignore_keywords '{ignored_match}' was found in log line '{log_line[:75]} ...'")
+                return True
+        return False
 
     def _search_and_process(self, log_line: str):
         """
-        Search for keywords/regex in log_line and collect the keyword settings of all found keywords. 
-        If a keyword is found, trigger notification and/or get attachment, container action, OliveTin action, etc.
+        Search for keywords/regex/all_of in log_line and trigger based on configured settings.
+        When keyword does not match:
+          - If 'buffer.mode: all' the log line is added to the buffer (if it exists).
+        When it matches:
+          - For 'buffer.mode: matching' we append to buffer if it exists or we start a new buffer if it passed cooldown and trigger_on.
+          - For non-buffer matches, we check cooldown and trigger_on settings before processing the match.
+          - For all triggers with 'merge_matches: true' (except for those with buffer) we collect and merge the trigger settings and fire once at end.
+          - Triggers with 'merge_matches: false' are processed immediately. 
         """
+
         keywords_found = []
         keyword_level_config = {}
-        target_merge_matches = self.target_config.merge_matches
-        
         # Search for configured keywords and collect their settings
         for keyword_dict in self.keywords:
-            found = self._search_keyword(log_line, keyword_dict)
-            if found:
-                merge_matches = keyword_dict.get("merge_matches", target_merge_matches)
-                if merge_matches is True:
-                    # last override first
-                    keyword_level_config = merge_config_levels(
-                        precedence=keyword_dict,
-                        fallback=keyword_level_config,
-                    )
-                    keywords_found.append(found)
-                else:
-                    self._process_log_match(log_line=log_line, keyword_level_config=keyword_dict, keywords_found=[found])
+            keyword_dict: dict
+            tracker_key = self._keyword_tracker_key(keyword_dict)
         
+            buffer_config: dict = self._get_keyword_setting(keyword_dict, "buffer") or {}
+            buffer_seconds = buffer_config.get("seconds", 0)
+            should_buffer = isinstance(buffer_seconds, int) and buffer_seconds > 0
+            buffer_key = stringify_json({
+                "trigger_identity": tracker_key,
+                "buffer": buffer_config,
+                "trigger_config": keyword_dict
+            }) if should_buffer else None
+            buffer_mode = buffer_config.get("mode") if should_buffer else None
+  
+            found = self._match_keyword(log_line, keyword_dict)
+            if not found:
+                if buffer_mode == "all" and buffer_key:
+                    self._try_append_to_existing_buffer(buffer_key, log_line, matching=False)
+                continue
+
+            ignore_keywords = (self.target_config_dict.get("ignore_keywords") or []) + (keyword_dict.get("ignore_keywords") or [])
+            is_ignored = self._is_ignored_match(ignore_keywords, log_line)
+            if is_ignored:
+                if buffer_mode == "all" and buffer_key:
+                    self._try_append_to_existing_buffer(buffer_key, log_line, matching=False)
+                continue
+
+            trigger_on = keyword_dict.get("trigger_on")
+            trigger_cooldown = self._get_keyword_setting(keyword_dict, "trigger_cooldown", 10)
+
+            # Treat keywords with buffer setting separately
+            if should_buffer and buffer_key:                    
+                if self._try_append_to_existing_buffer(buffer_key, log_line, matching=True):
+                    self.logger.debug(f"Keyword: '{found}' going into buffer")
+                    continue
+                
+                # for first match in buffer we check cooldown and trigger_on
+                if self.keyword_tracker.is_on_cooldown(tracker_key, trigger_cooldown):
+                    continue
+                if not self.keyword_tracker.record_trigger_on_match(tracker_key, trigger_on):
+                    continue
+
+                lms = LogMatchContext(
+                    trigger_context=merge_trigger_context(keyword_dict, self.target_config_dict),
+                    keyword_level_config=keyword_dict,
+                    keywords_found=[found],
+                    log_line=log_line
+                    )
+                self.logger.info(f"'{found}' was found in a log line but has 'buffer' configured. Log line will go into buffer and only trigger in {buffer_seconds}s")
+                bc = BufferContext(
+                    lines=[log_line],
+                    match_count=1,
+                    buffer_seconds=buffer_seconds,
+                    buffer_max_lines=buffer_config.get("max_lines"),
+                    buffer_key=buffer_key,
+                    log_match_context=lms,
+                    tracker_key=tracker_key,
+                    timestamp=time.monotonic()
+                )
+                self._start_match_buffer(bc)
+                continue
+                
+            # process non-buffer keywords
+            if self.keyword_tracker.is_on_cooldown(tracker_key, trigger_cooldown):
+                continue
+            if not self.keyword_tracker.record_trigger_on_match(tracker_key, trigger_on):
+                continue
+
+            self.keyword_tracker.restart_trigger_cooldown(tracker_key)
+            merge_matches = self._get_keyword_setting(keyword_dict, "merge_matches", False)
+            if merge_matches:
+                # with merge_matches enabled, all found keywords only trigger once
+                # keyword level settings are merged (last override first)
+                keyword_level_config = merge_config_levels(
+                    precedence=keyword_dict,
+                    fallback=keyword_level_config,
+                )
+                keywords_found.append(found)
+            else:
+                trigger_context = merge_trigger_context(keyword_dict, self.target_config_dict)
+                lms = LogMatchContext(
+                    trigger_context=trigger_context,
+                    keyword_level_config=keyword_dict,
+                    keywords_found=[found],
+                    log_line=log_line
+                    )
+                self._process_log_match(lms)
+                
         if keywords_found:
-            self._process_log_match(log_line, keyword_level_config, keywords_found)
-            
-    def _process_log_match(self, log_line: str, keyword_level_config: dict, keywords_found: list):
-        # When an ignored keyword is found, the log line gets ignored and the function returns
-        ignored = cast(list[dict], (keyword_level_config.get("ignore_keywords") or []) + (self.target_config_dict.get("ignore_keywords") or []))
-        for keyword in ignored:
-            ignored_match = self._search_keyword(log_line, keyword, ignore_keyword_time=True)
-            if ignored_match:
-                self.logger.debug(f"Keyword(s) '{keywords_found}' found in '{self.target_name}' but ignored because ignored keyword '{ignored_match}' was found")
+            trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
+            lms = LogMatchContext(
+                trigger_context=trigger_context,
+                keyword_level_config=keyword_level_config,
+                keywords_found=keywords_found,
+                log_line=log_line
+                )
+            self._process_log_match(lms)
+
+    def _try_append_to_existing_buffer(self, key: str, log_line: str, matching: bool) -> bool:
+        with self.log_match_buffer_lock:
+            if key not in self.log_match_buffer:
+                return False
+            ctx: BufferContext = self.log_match_buffer[key]
+            ctx.lines.append(log_line)
+            if matching:
+                ctx.match_count += 1
+            should_flush = ctx.buffer_max_lines and len(ctx.lines) >= ctx.buffer_max_lines
+        if should_flush:
+            self.logger.debug(
+                f"Flushing log match buffer for {self.target_name} because max_lines={ctx.buffer_max_lines} was reached"
+            )
+            self._flush_match_buffer(ctx)
+        return True
+    
+    def _flush_match_buffer(self, buffer_context: BufferContext):
+        with self.log_match_buffer_lock:
+            ctx: BufferContext | None = self.log_match_buffer.get(buffer_context.buffer_key)
+            if not ctx or ctx is not buffer_context:
+                self.logger.debug(f"Match buffer was already flushed, probably due to max_lines. Not flushing.") # TODO: remove
                 return
-        trigger_context = merge_trigger_context(keyword_level_config, self.target_config_dict)
-        formatted_log_entry ="\n  -----  LOG-ENTRY  -----\n" + ' | ' + '\n | '.join(log_line.splitlines()) + "\n   -----------------------"
-        k = "keyword was found" if len(keywords_found) == 1 else "keywords were found"
-        self.logger.info(f"The following {k} in {self.target_name}: {keywords_found}."
-                    + (f" (A Log FIle will be attached)" if trigger_context.get("attach_logfile") else "")
+            self.log_match_buffer.pop(buffer_context.buffer_key, None)
+
+        lms = buffer_context.log_match_context
+        lms.log_line = "\n".join(ctx.lines)
+        self.keyword_tracker.restart_trigger_cooldown(buffer_context.tracker_key)
+        elapsed = max(1, math.ceil(time.monotonic() - ctx.timestamp))
+        ctx.buffer_elapsed_seconds = min(ctx.buffer_seconds, elapsed)
+        self._process_log_match(lms, ctx)
+
+    def _wait_for_buffer_flush(self, buffer_context: BufferContext):
+        stopped = self.target_stop_event.wait(buffer_context.buffer_seconds)
+        if stopped:
+            self.logger.debug("Flushing log match buffer because monitoring stopped")
+        self._flush_match_buffer(buffer_context)
+
+    def _start_match_buffer(self, buffer_context: BufferContext):
+        should_flush = False
+        with self.log_match_buffer_lock:
+            if not self.log_match_buffer.get(buffer_context.buffer_key):
+                self.log_match_buffer[buffer_context.buffer_key] = buffer_context
+                should_flush = buffer_context.buffer_max_lines == 1
+            else:
+                self.logger.debug(f"Unexpected error: Buffer already exists for {buffer_context.tracker_key}. Not buffering...")
+                return
+        if should_flush:
+            return self._flush_match_buffer(buffer_context)
+        clear_thread = Thread(target=self._wait_for_buffer_flush, args=(buffer_context,), daemon=True)
+        clear_thread.start()
+
+    def _process_log_match(self, lms: LogMatchContext, buffer_context: BufferContext | None = None):
+        bes = buffer_context.buffer_elapsed_seconds if buffer_context else None
+        bmc = buffer_context.match_count if buffer_context else None
+        bl = buffer_context.lines if buffer_context else None
+        formatted_log_entry = (
+            "\n  -----  LOG-ENTRY  -----\n"  + ' | ' + '\n | '.join(lms.log_line.splitlines()) + "\n   -----------------------"
+        )
+        k = "keyword was found" if len(lms.keywords_found) == 1 else "keywords were found"
+        b = (f" {bmc} time" + ("s" if bmc != 1 else "") + f" in {bes}s") if isinstance(bmc, int) else ""
+        buffer_suffix = (b + f" while collecting {len(bl)} log line" + ("s" if len(bl) > 1 else f"")) if bl and len(bl) > (bmc or 0) else b
+        # TODO; was found in n log lines?
+        self.logger.info(f"The following {k}{buffer_suffix} in {self.target_name}: {lms.keywords_found}."
+                    + (f" (A Log FIle will be attached)" if lms.trigger_context.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )
 
@@ -323,17 +496,20 @@ class LogProcessor:
             target_name=self.target_name,
             monitor_type=self.monitor_type,
             source_metadata=self.monitored_target.get_metadata(),
-            keywords_found=keywords_found,
-            log_line=log_line,
-            regex=keyword_level_config.get("regex"),
+            keywords_found=lms.keywords_found,
+            log_line=lms.log_line,
+            regex=lms.keyword_level_config.get("regex"),
             hostname=self.monitored_target.hostname,
             host_identifier=self.monitored_target.host_identifier,
-            trigger_on=keyword_level_config.get("trigger_on"),
+            trigger_on=lms.keyword_level_config.get("trigger_on"),
+            buffer_match_count=bmc,
+            buffer_elapsed_seconds=buffer_context.buffer_elapsed_seconds if buffer_context else None,
+            buffer_line_count=len(buffer_context.lines) if buffer_context else 1
         )
         process_trigger(
             logger=self.logger,
             config=self.config,
-            trigger_context=trigger_context,
+            trigger_context=lms.trigger_context,
             monitored_target=self.monitored_target,
             notification_context=notification_context,
         )

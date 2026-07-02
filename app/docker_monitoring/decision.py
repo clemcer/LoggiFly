@@ -21,7 +21,7 @@ from config.models import (
 )
 from docker_monitoring.helpers import ContainerSnapshot, parse_label_config
 from monitoring import EffectiveTargetConfig
-from utils import merge_with_precedence, merge_defaults
+from utils import merge_config_levels, merge_defaults
 
 
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ def merge_rules(rules: List[ContainerRule | SwarmRule]) -> dict:
     """Merge matched rules into a single config dict. Later entries take precedence. Group config is handled separately in create_target_config."""
     result = {}
     for ro in rules:
-        result = merge_with_precedence(
+        result = merge_config_levels(
             precedence=ro.model_dump(exclude_none=True, exclude=_RULE_META_FIELDS),
             fallback=result,
         )
@@ -155,7 +155,7 @@ def create_target_config(
     # Merge order: global (lowest) < source < group < rule (highest)
     baseline_defaults = {}
     for d in [global_block_dict, source_config_dict] + group_config_dicts:
-        baseline_defaults = merge_with_precedence(
+        baseline_defaults = merge_defaults(
             precedence=d.get("defaults", {}),
             fallback=baseline_defaults,
         )
@@ -167,7 +167,7 @@ def create_target_config(
     }
     effective.update(defaults)
     if validated_label_config:
-        effective = merge_with_precedence(precedence=validated_label_config, fallback=effective)
+        effective = merge_config_levels(precedence=validated_label_config, fallback=effective)
 
     effective_target_config = EffectiveTargetConfig.model_validate(effective)
     return effective_target_config

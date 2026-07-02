@@ -10,6 +10,7 @@ import docker
 from docker.models.containers import Container
 import docker.errors
 from datetime import datetime, timedelta
+from dataclasses import dataclass
 
 from notifier import send_notification
 from line_processor import LogProcessor
@@ -19,7 +20,7 @@ from constants import (
     NotificationType,
     SUPPORTED_CONTAINER_ACTIONS,
 )
-from utils import convert_to_int, merge_trigger_context, get_env_var, TriggerTracker, is_true_env_var
+from utils import convert_to_int, merge_trigger_context, get_env_var, TriggerTracker, is_true_env_var, stringify_json
 from notification_formatter import NotificationContext
 from trigger import process_trigger
 from docker_monitoring.helpers import (
@@ -35,6 +36,16 @@ from monitoring import (
 from config.models import RootConfig, ContainerEventConfig
 from config.helpers import get_pretty_yaml_config
 from docker_monitoring.decision import MonitorDecision
+
+
+@dataclass
+class EventMatchContext:
+    trigger_context: dict
+    container_context: "MonitoredContainerContext"
+    event: dict
+    event_type: str
+
+
 class MonitoredContainerContext:
     """
     Runtime monitoring state for a container.
@@ -85,6 +96,9 @@ class MonitoredContainerContext:
         self.processor = None  # Will be set after initialization
         self.currently_configured = True
         self.not_monitored_since: datetime | None = None # time when the container was last monitored. needed for context cleanup
+
+        self.event_match_buffer = {}
+        self.event_match_buffer_lock = threading.Lock()
 
     def set_processor(self, processor):
         self.processor = processor
@@ -252,7 +266,7 @@ class DockerLogMonitor:
         identifier = None
         try:
             swarm_info = self.client.info().get("Swarm")
-            node_id = swarm_info.get("NodeID")
+            node_id = swarm_info.get("NodeID") if swarm_info else None
         except Exception as e:
             logging.error(f"Could not get info via docker client. Needed to get info about swarm role (manager/worker)")
             node_id = None
@@ -462,6 +476,8 @@ class DockerLogMonitor:
                     ctx.currently_configured = True
             # start monitoring containers that are in the config but not monitored yet
             for container in self.client.containers.list():
+                if not container or not container.id:
+                    continue
                 # Only start monitoring containers that are newly added to the config.yaml and not monitored yet
                 ctx = self._registry.get_by_id(container.id)
                 if not ctx or ctx.monitoring_stopped_event.is_set():
@@ -710,6 +726,39 @@ class DockerLogMonitor:
         self._add_thread(thread)
         thread.start()
 
+    def _try_increment_existing_buffer(self, key: str, emc: EventMatchContext) -> bool:
+        event_buffer = emc.container_context.event_match_buffer
+        buffer_lock = emc.container_context.event_match_buffer_lock
+        with buffer_lock:
+            b = event_buffer.get(key)
+            if not isinstance(b, int) or not b > 0:
+                return False
+            self.logger.debug(f"Event {emc.event_type} for {emc.container_context.target_name} going into buffer")
+            event_buffer[key] += 1
+            return True
+
+    def _start_event_buffer(self, buffer_seconds, key, emc: EventMatchContext):
+        event_buffer = emc.container_context.event_match_buffer
+        buffer_lock = emc.container_context.event_match_buffer_lock
+
+        def clear():
+            stopped = self.shutdown_event.wait(buffer_seconds)
+            if stopped:
+                self.logger.debug("Flushing event match buffer (from buffer_seconds) because monitoring stopped")
+            with buffer_lock:
+                t = event_buffer.pop(key, None)
+                if not t or not isinstance(t, int):
+                    self.logger.error(f"Unexpected error clearing docker event buffer for buffer_seconds. Value for key '{key}' is not positive integer: {t}")
+                    return
+            emc.container_context.event_trigger_tracker.restart_trigger_cooldown(emc.event_type)
+            self._trigger_matched_event(emc, buffer_match_count=t)
+
+        with buffer_lock:
+            self.logger.debug(f"Opened buffer for {emc.container_context.target_name} and event {emc.event_type}. Clearing in {buffer_seconds}s")
+            event_buffer[key] = 1
+            clear_thread = threading.Thread(target=clear, daemon=True)
+            clear_thread.start()
+
 
     def _process_event(self, event, ctx: MonitoredContainerContext):
         """
@@ -730,39 +779,69 @@ class DockerLogMonitor:
         trigger_level_config = ce.model_dump(exclude_none=True)
         trigger_context = merge_trigger_context(trigger_level_config, ctx.target_config_dict)
 
+        emc = EventMatchContext(trigger_context, ctx, event, event_type)
+        
+        buffer_config = trigger_context.get("buffer") or {}
+        buffer_seconds = buffer_config.get("seconds", 0)
+        should_buffer = bool(isinstance(buffer_seconds, int) and buffer_seconds > 0)
+        buffer_key = None
+        if should_buffer:
+            if buffer_config.get("mode", "matching") == "all":
+                self.logger.warning(
+                    "'buffer.mode: all' is not supported for container event triggers "
+                    f"({ctx.target_name}, event: {event_type}). Using 'buffer.mode: matching' instead."
+                )
+            buffer_key = stringify_json({
+                "trigger_context": trigger_context,
+                "event": event_type 
+            })
+            if self._try_increment_existing_buffer(buffer_key, emc):
+                return
+
         trigger_cooldown = trigger_context.get("trigger_cooldown")
         assert trigger_cooldown is not None, "trigger_cooldown must be set"
         if ctx.event_trigger_tracker.is_on_cooldown(event_type, trigger_cooldown):
             self.logger.info(f"Event '{event_type}' for container '{ctx.target_name}' is on cooldown. Skipping trigger.")
             return
+
         trigger_on = trigger_level_config.get("trigger_on")
-        if ctx.event_trigger_tracker.record_match(event_type, trigger_on):
+        if ctx.event_trigger_tracker.record_trigger_on_match(event_type, trigger_on):
             self.logger.info(f"Event '{event_type}' for container '{ctx.target_name}' triggered. Processing trigger.")
         else:
             self.logger.debug(f"Event '{event_type}' for container '{ctx.target_name}' not triggered. Skipping trigger.")
             return
 
-        exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
-        signal = event.get("Actor", {}).get("Attributes", {}).get("signal", None)
+        if should_buffer and buffer_key:
+            self._start_event_buffer(buffer_seconds, buffer_key, emc)
+        else:
+            ctx.event_trigger_tracker.restart_trigger_cooldown(event_type)
+            self._trigger_matched_event(emc)
 
-        monitored_target = MonitoredContainerTarget(ctx, self)
+    def _trigger_matched_event(self, emc: EventMatchContext, buffer_match_count: int = 1):
+        exit_code = emc.event.get("Actor", {}).get("Attributes", {}).get("exitCode", None)
+        signal = emc.event.get("Actor", {}).get("Attributes", {}).get("signal", None)
+
+        monitored_target = MonitoredContainerTarget(emc.container_context, self)
 
         notification_context = NotificationContext(
             notification_type=NotificationType.DOCKER_EVENT,
-            target_name=ctx.target_name,
+            target_name=emc.container_context.target_name,
             monitor_type=monitored_target.monitor_type,
             source_metadata=monitored_target.get_metadata(),
-            event=event_type,
+            event=emc.event_type,
             host_identifier=self.host_identifier,
             hostname=self.hostname,
-            time=event.get("time"),
+            time=emc.event.get("time"),
             exit_code=exit_code,
             signal=signal,
+            trigger_on=emc.trigger_context.get("trigger_on"),
+            buffer_match_count=buffer_match_count,
+            buffer_elapsed_seconds=(emc.trigger_context.get("buffer") or {}).get("seconds")
         )
         process_trigger(
             logger=self.logger,
             config=self.config,
-            trigger_context=trigger_context,
+            trigger_context=emc.trigger_context,
             monitored_target=monitored_target,
             notification_context=notification_context,
         )

@@ -74,6 +74,18 @@ Only present when [`trigger_on`](../config/keywords-and-triggers#trigger-on) is 
 | <code v-pre>{{ trigger_on_count }}</code> | The configured match count threshold |
 | <code v-pre>{{ trigger_on_timeframe }}</code> | The configured timeframe in seconds |
 
+### Buffer information
+
+Only present when trigger was [buffered](../config/keywords-and-triggers#buffering-triggers).
+
+
+| Field | Description |
+|-------|-------------|
+| <code v-pre>{{ buffer_elapsed_seconds }}</code> | The time in seconds that the trigger was buffered |
+| <code v-pre>{{ buffer_match_count }}</code> | How often the trigger matched in the specified number of seconds |
+| <code v-pre>{{ buffer_line_count }}</code> | How many lines were collected. Only differs from buffer_match_count when `mode` is `all` |
+
+
 ### Container Action Information
 
 Only present when a [container action](../actions#container-actions) is triggered.
@@ -123,7 +135,12 @@ Only available for notifications triggered by [container events](../config/conta
 | <code v-pre>{{ date }}</code> | Date only (YYYY-MM-DD) |
 | <code v-pre>{{ time }}</code> | Time only (HH:MM:SS) |
 | <code v-pre>{{ datetime }}</code> | Combined date and time (YYYY-MM-DD HH:MM:SS) |
+
+::: info
+<code v-pre>{{ defaults }}</code> exposes all default context fields as a JSON string, useful for debugging. |
+
 :::
+
 
 
 ## Additional Fields

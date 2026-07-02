@@ -23,6 +23,7 @@ from config.helpers import (
     validate_container_action,
     discriminate_keyword_type,
     validate_trigger_on,
+    validate_buffer_config
 )
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,11 @@ class ActionCooldownMixin:
     @field_validator("container_action_cooldown", mode="before")
     def validate_container_action_cooldown(cls, v):
         return validate_container_action_cooldown(v)
+    
+class BufferConfig(BaseConfigModel):
+    seconds: int = Field(ge=0, description="Number of seconds to buffer subsequent log lines.")
+    mode: Literal["matching", "all"] = Field("matching", description="'matching' only captures matching log lines (default). 'all' captures all subsequent log lines")
+    max_lines: Optional[int] = Field(None, ge=1, description="Maximum number of lines to capture")
 
 class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     """Optional overridable settings that can be applied at the container, rule, or keyword level."""
@@ -200,6 +206,11 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     regex_case_sensitive: Optional[bool] = Field(None, description="Whether regex patterns are case-sensitive.")
     disable_trigger_notifications: Optional[bool] = Field(None, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: Optional[bool] = Field(None, description="Combine multiple keyword matches from the same log entry into a single notification.")
+    buffer: Optional[BufferConfig] = Field(None, description="Define buffering conditions to capture subsequent log lines")
+
+    @field_validator("buffer", mode="before")
+    def validate_buffer_config(cls, v):
+        return validate_buffer_config(v)
 
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     """Global default settings applied to all rules unless overridden at a lower level."""
@@ -211,7 +222,11 @@ class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     regex_case_sensitive: bool = Field(True, description="Whether regex patterns are case-sensitive.")
     disable_trigger_notifications: bool = Field(False, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
     merge_matches: bool = Field(False, description="Combine multiple keyword matches from the same log entry into a single notification.")
+    buffer: Optional[BufferConfig] = Field(None, description="Define buffering conditions to capture subsequent log lines")
 
+    @field_validator("buffer", mode="before")
+    def validate_buffer_config(cls, v):
+        return validate_buffer_config(v)
 
 # ================================================
 # Notifications Config Models
