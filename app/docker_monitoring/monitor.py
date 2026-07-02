@@ -49,7 +49,8 @@ class MonitoredContainerContext:
         target_config: EffectiveTargetConfig,
         decision: MonitorDecision,
         host_identifier: str | None,
-        hostname: str
+        hostname: str,
+        logger: logging.Logger
         ):
         """
         Initialize monitoring context for a container.
@@ -67,6 +68,8 @@ class MonitoredContainerContext:
         self.decision = decision
         self.host_identifier = host_identifier
         self.hostname = hostname
+
+        self.event_trigger_tracker = TriggerTracker(logger=logger, trigger_type="container_event")
 
         # Derived from snapshot
         self.monitor_type = MonitorType.SWARM if snapshot.is_swarm_service else MonitorType.CONTAINER
@@ -238,8 +241,6 @@ class DockerLogMonitor:
         self.last_action_lock = threading.Lock()
         self._registry = MonitoredContainerRegistry()
 
-        self.event_trigger_tracker = TriggerTracker(logger=self.logger, trigger_type="container_event")
-
         self.configured_stale_threshold_hours = convert_to_int(get_env_var("CLEANUP_THRESHOLD_HOURS_CONFIGURED"), fallback_value=24*7)
         self.stale_threshold_hours = convert_to_int(get_env_var("CLEANUP_THRESHOLD_HOURS_UNCONFIGURED"), fallback_value=24)
         self.cleanup_interval_minutes = convert_to_int(get_env_var("CLEANUP_INTERVAL_MINUTES"), fallback_value=60, min_value=1)
@@ -382,6 +383,7 @@ class DockerLogMonitor:
             decision=decision,
             host_identifier=self.host_identifier,
             hostname=self.hostname,
+            logger=self.logger
         )
         self._registry.add(ctx)
         # Create a MonitoredContainerTarget adapter and log processor
@@ -730,11 +732,11 @@ class DockerLogMonitor:
 
         trigger_cooldown = trigger_context.get("trigger_cooldown")
         assert trigger_cooldown is not None, "trigger_cooldown must be set"
-        if self.event_trigger_tracker.is_on_cooldown(event_type, trigger_cooldown):
+        if ctx.event_trigger_tracker.is_on_cooldown(event_type, trigger_cooldown):
             self.logger.info(f"Event '{event_type}' for container '{ctx.target_name}' is on cooldown. Skipping trigger.")
             return
         trigger_on = trigger_level_config.get("trigger_on")
-        if self.event_trigger_tracker.record_match(event_type, trigger_on):
+        if ctx.event_trigger_tracker.record_match(event_type, trigger_on):
             self.logger.info(f"Event '{event_type}' for container '{ctx.target_name}' triggered. Processing trigger.")
         else:
             self.logger.debug(f"Event '{event_type}' for container '{ctx.target_name}' not triggered. Skipping trigger.")
