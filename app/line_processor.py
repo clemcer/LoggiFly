@@ -477,14 +477,16 @@ class LogProcessor:
 
     def _process_log_match(self, lms: LogMatchContext, buffer_context: BufferContext | None = None):
         bes = buffer_context.buffer_elapsed_seconds if buffer_context else None
-        buffer_match_count = buffer_context.match_count if buffer_context else None
+        bmc = buffer_context.match_count if buffer_context else None
+        bl = buffer_context.lines if buffer_context else None
         formatted_log_entry = (
             "\n  -----  LOG-ENTRY  -----\n"  + ' | ' + '\n | '.join(lms.log_line.splitlines()) + "\n   -----------------------"
         )
         k = "keyword was found" if len(lms.keywords_found) == 1 else "keywords were found"
-        k = k + (f" {buffer_match_count} times in {bes}s" if buffer_match_count and buffer_match_count > 1 else "")
+        b = (f" {bmc} time" + ("s" if bmc != 1 else "") + f" in {bes}s") if isinstance(bmc, int) else ""
+        buffer_suffix = (b + f" while collecting {len(bl)} log line" + ("s" if len(bl) > 1 else f"")) if bl and len(bl) > (bmc or 0) else b
         # TODO; was found in n log lines?
-        self.logger.info(f"The following {k} in {self.target_name}: {lms.keywords_found}."
+        self.logger.info(f"The following {k}{buffer_suffix} in {self.target_name}: {lms.keywords_found}."
                     + (f" (A Log FIle will be attached)" if lms.trigger_context.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
                     )
@@ -500,7 +502,7 @@ class LogProcessor:
             hostname=self.monitored_target.hostname,
             host_identifier=self.monitored_target.host_identifier,
             trigger_on=lms.keyword_level_config.get("trigger_on"),
-            buffer_match_count=buffer_match_count,
+            buffer_match_count=bmc,
             buffer_elapsed_seconds=buffer_context.buffer_elapsed_seconds if buffer_context else None,
             buffer_line_count=len(buffer_context.lines) if buffer_context else 1
         )

@@ -110,10 +110,16 @@ SUPPORTED_CONTAINER_ACTIONS: tuple[str, ...] = tuple(action.value for action in 
 SUPPORTED_CONTAINER_EVENTS = tuple(MAP_CONFIG_EVENTS_TO_DOCKER_EVENTS.keys())
 
 BUFFERED_SUFFIX = (
+    "{% set matches = buffer_match_count|default(1, true)|int %}"
+    "{% set lines = buffer_line_count|default(0, true)|int %}"
     "{% if buffer_elapsed_seconds|default(0, true)|int > 0 %}"
-    " {{ buffer_match_count|default(1) }} "
-    "{% if buffer_match_count|default(1)|int == 1 %}time{% else %}times{% endif %}"
+    " {{ matches }} "
+    "{% if matches == 1 %}time{% else %}times{% endif %}"
     " within {{ buffer_elapsed_seconds }}s"
+    "{% endif %}"
+    "{% if lines > matches %}"
+    " while collecting {{ lines }} log "
+    "{% if lines == 1 %}line{% else %}lines{% endif %}"
     "{% endif %}"
 )
 
