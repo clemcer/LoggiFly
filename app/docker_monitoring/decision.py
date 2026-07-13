@@ -336,7 +336,7 @@ class MonitorDecision:
             if d == LabelDecision.MONITOR:
                 label_decision = d
                 label_source = source_name
-                ignore_config = labels.get("loggifly.ignore_config", "false").lower() == "true"
+                ignore_config = labels.get("loggifly.ignore_config", "false").lower().strip() == "true"
                 parsed = parse_label_config(labels)
                 validated_label_config = validate_label_config(parsed, target_name, monitor_type)
 

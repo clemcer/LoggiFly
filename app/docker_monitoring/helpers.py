@@ -279,65 +279,124 @@ def get_service_target_name(labels) -> str | None:
     else:
         return service_name
 
-def parse_label_config(labels: dict) -> dict[str, Any]:
-    """Parse LoggiFly configuration from Docker labels."""
 
+def parse_label_config(labels: dict) -> dict[str, Any]:
+    """Parse LoggiFly Docker labels into a configuration dictionary.
+
+    Supports top-level settings, comma-separated keyword and container-event
+    lists, indexed keyword and event definitions (loggifly.keywords.1.keyword="value"), and nested `buffer` and
+    `trigger_on` settings. Indexed entries are returned in numeric order.
+
+    Type conversion and schema validation are handled separately by Pydantic.
+    """
+
+    def _set_nested_value(target: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
+        """Set a nested value; a more-specific path replaces a scalar parent."""
+        current = target
+        for depth, field in enumerate(path[:-1], start=1):
+            if field not in current or not isinstance(current[field], dict):
+                current[field] = {}
+            current = current[field]
+        current[path[-1]] = value
+
+    def _split_label_list(value: str) -> list[str]:
+        return [item.strip() for item in value.split(",") if item.strip()] 
+
+    label_prefix = "loggifly."
     keywords_by_index = {}
     keywords_to_append = []
     container_events_by_index = {}
     container_events_to_append = []
     config = {}
-    if labels.get("loggifly.monitor", "false").lower() != "true":
-        return config
-    for key, value in labels.items():
-        if not key.startswith("loggifly."):
+
+    label_keys = sorted([key for key in labels if isinstance(key, str)], key=len)
+    for key in label_keys:
+        if not key.startswith(label_prefix):
             continue
-        parts = key[9:].split('.') 
+
+        value = labels[key]
+        if not isinstance(value, str):
+            logger.warning(f"Ignoring LoggiFly label {key}: value must be a string", )
+            continue
+
+        parts = key.removeprefix(label_prefix).split(".")
+        if not parts or not parts[0]:
+            logger.warning(f"Ignoring LoggiFly label {key}: invalid path")
+            continue
         if len(parts) == 1:
-            # Simple comma-separated keyword list
-            if parts[0] == "keywords" and isinstance(value, str):
-                keywords_to_append = [kw.strip() for kw in value.split(",") if kw.strip()]
-            elif parts[0] == "ignore_keywords" and isinstance(value, str):
-                config["ignore_keywords"] = [kw.strip() for kw in value.split(",") if kw.strip()]
-            elif parts[0] == "container_events" and isinstance(value, str):
-                container_events_to_append = [event.strip() for event in value.split(",") if event.strip()]
+            # Simple comma-separated keyword list - loggifly.keywords = "keyword1,keyword2"
+            if parts[0] == "keywords":
+                keywords_to_append = _split_label_list(value)
+            elif parts[0] == "ignore_keywords":
+                config["ignore_keywords"] = _split_label_list(value)
+            elif parts[0] == "container_events":
+                container_events_to_append = _split_label_list(value)
             # Top Level Fields (e.g. ntfy_topic, attach_logfile, etc.)
             else:
                 config[parts[0]] = value
         # Keywords
         elif parts[0] == "keywords":
             index = parts[1]
+            if not index.isdigit():
+                logger.warning(f"Ignoring LoggiFly label {key}: keyword index must be a number")
+                continue
             # Simple keywords (direct value instead of dict) - loggifly.keywords.1 = value
             if len(parts) == 2:
                 keywords_by_index.setdefault(index, {})["keyword"] = value 
             # Complex Keyword (Dict with fields) - loggifly.keywords.1.keyword = value or loggifly.keywords.1.regex = value
-            else:
+            elif len(parts) == 3:
                 field = parts[2]
                 if index not in keywords_by_index:
                     keywords_by_index[index] = {}
-                if field == "all_of":
-                    keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
-                elif field == "ignore_keywords":
-                    keywords_by_index[index][field] = [kw.strip() for kw in value.split(",") if kw.strip()]
+                if field in ("all_of", "ignore_keywords"):
+                    keywords_by_index[index][field] = _split_label_list(value)
                 else:
                     keywords_by_index[index][field] = value
+            # something like loggifly.keywords.1.buffer.seconds = 5
+            elif len(parts) == 4:
+                field = parts[2]
+                if field in ("buffer", "trigger_on"):
+                    item = keywords_by_index.setdefault(index, {})
+                    _set_nested_value(item, (field, parts[3]), value)
+            else:
+                logger.warning(f"Ignoring unsupported LoggiFly label path '{key}'")
+
         elif parts[0] == "container_events":
             index = parts[1]
+            if not index.isdigit():
+                logger.warning(f"Ignoring LoggiFly label {key}: container_events index must be a number")
+                continue
             # simple event, direct value - loggifly.container_events.1 = event
             if len(parts) == 2:
                 container_events_by_index.setdefault(index, {})["event"] = value
             # complex event, dict with fields - loggifly.container_events.1.event = event and loggifly.container_events.1.action = action
-            else:
+            elif len(parts) == 3:
                 field = parts[2]
                 if index not in container_events_by_index:
                     container_events_by_index[index] = {}
                 container_events_by_index[index][field] = value
-    config["keywords"] = [keywords_by_index[k] for k in sorted(keywords_by_index)]
+            # something like loggifly.container_events.1.buffer.seconds = 5
+            elif len(parts) == 4:
+                field = parts[2]
+                if field in ("buffer", "trigger_on"):
+                    item = container_events_by_index.setdefault(index, {})
+                    _set_nested_value(item, (field, parts[3]), value)
+            else:
+                logger.warning(f"Ignoring unsupported LoggiFly label path '{key}'")
+
+        elif parts[0] == "buffer" and len(parts) == 2 and parts[1]:
+            # Buffer config fields - loggifly.buffer.seconds = 5
+            field = parts[1]
+            _set_nested_value(config, ("buffer", field), value)
+        else:
+            logger.warning(f"Ignoring unsupported LoggiFly label path '{key}'")
+
+    config["keywords"] = [keywords_by_index[k] for k in sorted(keywords_by_index, key=int)]
     if keywords_to_append:
         config["keywords"].extend(keywords_to_append)
 
     if container_events_by_index or container_events_to_append:
-        config["container_events"] = [container_events_by_index[k] for k in sorted(container_events_by_index)]
+        config["container_events"] = [container_events_by_index[k] for k in sorted(container_events_by_index, key=int)]
         if container_events_to_append:
             config["container_events"].extend(container_events_to_append)    
     logger.debug(f"Parsed config: {config}")
