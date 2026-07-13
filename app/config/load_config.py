@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import ValidationError
 from constants import NotificationPrefix
 from config.models.root import RootConfig
-from config.models.base import SettingsConfig, RootDefaultsConfig, NotificationDefaults, SystemNotifications
+from config.models.base import SettingsConfig, RootDefaultsConfig, NotificationDefaults, SystemNotifications, BufferConfig
 from config.helpers import stringify_numbers, get_pretty_yaml_config, format_pydantic_error
 from utils import get_env_var, is_true_env_var
 
@@ -69,6 +69,12 @@ def override_with_env(cnf: dict) -> dict:
     
     system_notifications = get_env_var("SYSTEM_NOTIFICATIONS")
 
+    buffer_config = {}
+    for key in (BufferConfig.model_fields.keys()):
+        env_value = get_env_var(f"BUFFER_{key.upper()}")
+        if env_value:
+            buffer_config[key] = env_value
+
     # SETTINGS BLOCK ------------------------------------------------------------
     cnf.setdefault("settings", {})
 
@@ -88,6 +94,10 @@ def override_with_env(cnf: dict) -> dict:
         skip_keys=skip_keys + notification_defaults_keys, 
         list_keys=list_keys
         ))
+    if buffer_config:
+        if not isinstance(cnf["global"]["defaults"].get("buffer"), dict):
+            cnf["global"]["defaults"]["buffer"] = {}
+        cnf["global"]["defaults"]["buffer"].update(buffer_config)
     if global_keywords:
         cnf["global"].setdefault("keywords", [])
         cnf["global"]["keywords"].extend(global_keywords)
