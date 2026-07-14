@@ -39,9 +39,12 @@ services:
       loggifly.keywords: "keyword1,keyword2,keyword3"
       loggifly.ignore_keywords: "keyword4,keyword5,keyword6"
       
-      # simple keyword with notification title
+      # simple keyword with notification title and buffer
       loggifly.keywords.0: "critical" 
       loggifly.keywords.0.title_template: "{container}: Critical Alert"
+      loggifly.keywords.0.buffer.seconds: 5
+      loggifly.keywords.0.buffer.mode: "all"
+      loggifly.keywords.0.buffer.max_lines: 10
       
       # regex with ntfy tags
       loggifly.keywords.1.regex: 'download.*failed' 

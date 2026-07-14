@@ -50,6 +50,9 @@ Maps to the `global.defaults:` section in the config.yaml.
 | `REGEX_CASE_SENSITIVE` | `bool` | `true` | Whether regex patterns are case-sensitive. | `global.defaults.regex_case_sensitive` |
 | `DISABLE_TRIGGER_NOTIFICATIONS` | `bool` | `false` | Suppress all notifications. Useful when only container actions or OliveTin actions are needed. | `global.defaults.disable_trigger_notifications` |
 | `MERGE_MATCHES` | `bool` | `false` | Combine multiple keyword matches from the same log entry into a single notification. | `global.defaults.merge_matches` |
+| `BUFFER_SECONDS` | `int` | `0` | Number of seconds to buffer subsequent log lines before triggering and sending the notification. | `global.defaults.buffer.seconds` |
+| `BUFFER_MODE` | `string` | `matching` | One of `matching` or `all`. `matching` collects only subsequent log lines that match the same keyword. `all` collects all subsequent log lines. Default is `matching`. | `global.defaults.buffer.mode` |
+| `BUFFER_MAX_LINES` | `int` | `-` | Optional. Maximum number of log lines to buffer before sending a notification. | `global.defaults.buffer.max_lines` |
 
 ## Notifications
 
