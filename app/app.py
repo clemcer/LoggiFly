@@ -404,8 +404,8 @@ def create_docker_clients() -> list[DockerClientInfo]:
                         hostname = f"{parsed.hostname}"
                     logging.warning(
                         f"Could not get hostname for {host_url}. LoggiFly will call this host '{hostname}' in notifications and logging to differentiate it from other hosts."
-                        f"\nThis may occur if using a Socket Proxy that does not allow to retrieve the hostname via the docker client"
-                        f"\nYou can also set a label in DOCKER_HOST as 'tcp://host:2375|label' that will be used as a hostname"
+                        "\nThis may occur if using a Socket Proxy that does not allow to retrieve the hostname via the docker client"
+                        "\nYou can also set a label in DOCKER_HOST as 'tcp://host:2375|label' that will be used as a hostname"
                         f"\nError details: {e}")    
             docker_hosts.append(
                 DockerClientInfo(

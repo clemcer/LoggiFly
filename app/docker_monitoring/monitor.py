@@ -243,7 +243,7 @@ class DockerLogMonitor:
         self._init_logging(formatter)
 
         if self.swarm_mode:
-            self.logger.info(f"Running in swarm mode.")
+            self.logger.info("Running in swarm mode.")
 
         self.loggifly_notification_title = f"[{self.host_identifier}] - LoggiFly" if self.host_identifier else "LoggiFly"
         self.event_stream = None
@@ -542,7 +542,7 @@ class DockerLogMonitor:
                 if not self.client.ping():
                     disconnected = True
             except Exception as e:
-                logging.error(f"Error while trying to ping Docker Host {self.host_url}: {e}")
+                self.logger.error(f"Error while trying to ping Docker Host {self.host_url}: {e}")
                 disconnected = True
             if disconnected and not self.shutdown_event.is_set():
                 self.logger.error(f"Connection lost to Docker Host {self.host_url} ({self.hostname if self.hostname else ''}).")
@@ -698,9 +698,9 @@ class DockerLogMonitor:
                                     # TODO: maybe add template fields
                                     send_notification(self.config, title=self.loggifly_notification_title, message=f"Monitoring new container: {target_name}")
 
-                        elif event.get("Action") == "stop": # TODO: or die?
+                        elif event.get("Action") == "die":
                             if ctx := self._registry.get_by_id(container_id):
-                                self.logger.debug(f"The Container {container_name or container_id} was stopped. Stopping Monitoring now.")
+                                self.logger.debug(f"The Container {container_name or container_id} shut down. Stopping Monitoring now.")
                                 self._stop_and_close_stream(ctx, wait_for_thread=False)
 
                         if (ctx:= self._registry.get_by_id(container_id)) and ctx.currently_configured:

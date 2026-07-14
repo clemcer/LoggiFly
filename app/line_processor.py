@@ -444,7 +444,6 @@ class LogProcessor:
         with self.log_match_buffer_lock:
             ctx: BufferContext | None = self.log_match_buffer.get(buffer_context.buffer_key)
             if not ctx or ctx is not buffer_context:
-                self.logger.debug(f"Match buffer was already flushed, probably due to max_lines. Not flushing.") # TODO: remove
                 return
             self.log_match_buffer.pop(buffer_context.buffer_key, None)
 
@@ -485,7 +484,6 @@ class LogProcessor:
         k = "keyword was found" if len(lms.keywords_found) == 1 else "keywords were found"
         b = (f" {bmc} time" + ("s" if bmc != 1 else "") + f" in {bes}s") if isinstance(bmc, int) else ""
         buffer_suffix = (b + f" while collecting {len(bl)} log line" + ("s" if len(bl) > 1 else f"")) if bl and len(bl) > (bmc or 0) else b
-        # TODO; was found in n log lines?
         self.logger.info(f"The following {k}{buffer_suffix} in {self.target_name}: {lms.keywords_found}."
                     + (f" (A Log FIle will be attached)" if lms.trigger_context.get("attach_logfile") else "")
                     + f"{formatted_log_entry}"
