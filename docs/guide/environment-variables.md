@@ -103,6 +103,7 @@ Shortcuts to configure Docker Swarm service monitoring without a config file. Ma
 |----------|------|---------|-------------|
 | `CONFIG_PATH` | `string` | `/config/config.yaml` | Path to the YAML config file inside the container. |
 | `DOCKER_HOST` | `string` | `–` | Docker socket or TCP address to connect to (e.g. `tcp://remote-host:2375`). Defaults to the local socket. |
+| `LOGGIFLY_DOCKER_POOL_MAXSIZE` | `int` | `64` | Maximum number of HTTP(S) connections retained per TCP Docker host for reuse. Additional connections remain allowed. Does not apply to Unix, SSH, or named-pipe transports. |
 | `LOGGIFLY_MODE` | `string` | `–` | Set to `swarm` to get additional context in notifications about which node the container that has triggered a notification is running on. |
 | `STRICT_CONFIG` | `bool` | `true` | Make unknown config fields raise an error instead of a warning. |
 | `DEBUG_TARGET_CONFIG` | `bool` | `false` | Enable detailed logging showing the effective target config for each target (debug logging needs to be enabled) |
