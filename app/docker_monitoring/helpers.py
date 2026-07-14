@@ -353,11 +353,9 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
                 else:
                     keywords_by_index[index][field] = value
             # something like loggifly.keywords.1.buffer.seconds = 5
-            elif len(parts) == 4:
-                field = parts[2]
-                if field in ("buffer", "trigger_on"):
-                    item = keywords_by_index.setdefault(index, {})
-                    _set_nested_value(item, (field, parts[3]), value)
+            elif len(parts) == 4 and parts[2] in ("buffer", "trigger_on"):
+                item = keywords_by_index.setdefault(index, {})
+                _set_nested_value(item, (parts[2] , parts[3]), value)
             else:
                 logger.warning(f"Ignoring unsupported LoggiFly label path '{key}'")
 
@@ -376,11 +374,9 @@ def parse_label_config(labels: dict) -> dict[str, Any]:
                     container_events_by_index[index] = {}
                 container_events_by_index[index][field] = value
             # something like loggifly.container_events.1.buffer.seconds = 5
-            elif len(parts) == 4:
-                field = parts[2]
-                if field in ("buffer", "trigger_on"):
-                    item = container_events_by_index.setdefault(index, {})
-                    _set_nested_value(item, (field, parts[3]), value)
+            elif len(parts) == 4 and parts[2] in ("buffer", "trigger_on"):
+                item = container_events_by_index.setdefault(index, {})
+                _set_nested_value(item, (parts[2], parts[3]), value)
             else:
                 logger.warning(f"Ignoring unsupported LoggiFly label path '{key}'")
 
