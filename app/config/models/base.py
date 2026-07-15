@@ -6,7 +6,8 @@ from pydantic import (
     SecretStr,
     Field,
     Discriminator,
-    Tag
+    Tag,
+    BeforeValidator
 )
 from typing import Literal, Optional, List, Union, Annotated, Dict, Any
 from contextvars import ContextVar
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 _validation_ctx: ContextVar[Dict[str, Any]] = ContextVar("_validation_ctx", default={})
 SKIP_CONTAINER_ACTION_VALIDATION = "SKIP_CONTAINER_ACTION_VALIDATION"
 
+def strip_bool_string(value: Any) -> Any:
+    return value.strip() if isinstance(value, str) else value
+
+NormalizedBool = Annotated[bool, BeforeValidator(strip_bool_string)]
+
 class BaseConfigModel(BaseModel):
     """Base configuration model with common Pydantic settings."""
     model_config = ConfigDict(
@@ -45,7 +51,7 @@ class BaseConfigModel(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def log_extra_fields(cls, data: Any) -> Any:
-        if not strict_config_validation() and isinstance(data, dict):
+        if isinstance(data, dict) and cls.model_config.get("extra") == "ignore":
             known = set(cls.model_fields.keys())
             for field_info in cls.model_fields.values():
                 if field_info.alias:
@@ -64,19 +70,19 @@ class BaseConfigModel(BaseModel):
 # ================================================
 
 class SystemNotifications(BaseConfigModel):
-    start: bool = Field(True, description="Enable the notification sent when LoggiFly starts.")
-    shutdown: bool = Field(True, description="Enable the notification sent when LoggiFly shuts down.")
-    config_reload: bool = Field(True, description="Enable the notification sent when the config file is reloaded.")
-    monitor_event: bool = Field(True, description="Enable the notification sent when a container starts or stops being monitored.")
+    start: NormalizedBool = Field(True, description="Enable the notification sent when LoggiFly starts.")
+    shutdown: NormalizedBool = Field(True, description="Enable the notification sent when LoggiFly shuts down.")
+    config_reload: NormalizedBool = Field(True, description="Enable the notification sent when the config file is reloaded.")
+    monitor_event: NormalizedBool = Field(True, description="Enable the notification sent when a container starts or stops being monitored.")
 
 
 class SettingsConfig(BaseConfigModel):
     """Application-wide settings that control LoggiFly's behaviour."""
     log_level: str = Field("INFO", description="Log verbosity level. One of `DEBUG`, `INFO`, `WARNING`, `ERROR`.")
-    multi_line_entries: bool = Field(True, description="Catch log entries that span multiple lines instead of going line by line.")
-    compact_summary_message: bool = Field(False, description="Get a comma-separated list of monitored targets instead of a multi-line list in startup and config reload notifications.")
-    reload_config: bool = Field(True, description="Automatically reload configuration when the config file changes.")
-    system_notifications: SystemNotifications | bool = Field(SystemNotifications(), description="System notifications settings. Can be set to a boolean to enable or disable all notifications or to a SystemNotifications object to enable or disable specific notifications.") # type: ignore[call-arg]
+    multi_line_entries: NormalizedBool = Field(True, description="Catch log entries that span multiple lines instead of going line by line.")
+    compact_summary_message: NormalizedBool = Field(False, description="Get a comma-separated list of monitored targets instead of a multi-line list in startup and config reload notifications.")
+    reload_config: NormalizedBool = Field(True, description="Automatically reload configuration when the config file changes.")
+    system_notifications: SystemNotifications | NormalizedBool = Field(SystemNotifications(), description="System notifications settings. Can be set to a boolean to enable or disable all notifications or to a SystemNotifications object to enable or disable specific notifications.") # type: ignore[call-arg]
 
     def is_notification_enabled(self, type_string: str) -> bool:
         if isinstance(self.system_notifications, bool):
@@ -110,13 +116,13 @@ class NtfyViewAction(BaseConfigModel):
     action: Literal["view"] = Field("view", description="Action type. Must be `view`.")
     label: str = Field(description="Button label shown in the notification.")
     url: str = Field(description="URL to open when the action button is tapped.")
-    clear: Optional[bool] = Field(False, description="Clear the notification after the action is triggered.")
+    clear: Optional[NormalizedBool] = Field(False, description="Clear the notification after the action is triggered.")
 
 class NtfyBroadcastAction(BaseConfigModel):
     """Ntfy action that sends an Android broadcast intent."""
     action: Literal["broadcast"] = Field("broadcast", description="Action type. Must be `broadcast`.")
     label: str = Field(description="Button label shown in the notification.")
-    clear: Optional[bool] = Field(False, description="Clear the notification after the action is triggered.")
+    clear: Optional[NormalizedBool] = Field(False, description="Clear the notification after the action is triggered.")
     intent: Optional[str] = Field(None, description="Android intent for the broadcast action.")
     extras: Optional[dict] = Field(None, description="Extra key-value pairs for the Android intent.")
 
@@ -125,7 +131,7 @@ class NtfyHttpAction(BaseConfigModel):
     action: Literal["http"] = Field("http", description="Action type. Must be `http`.")
     label: str = Field(description="Button label shown in the notification.")
     url: str = Field(description="URL called by the HTTP action.")
-    clear: Optional[bool] = Field(False, description="Clear the notification after the action is triggered.")
+    clear: Optional[NormalizedBool] = Field(False, description="Clear the notification after the action is triggered.")
     method: Optional[str] = Field(None, description="HTTP method for the request (e.g. `GET`, `POST`).")
     headers: Optional[dict] = Field(None, description="Custom HTTP headers to include in the request.")
     body: Optional[str] = Field(None, description="Request body for the HTTP action.")
@@ -150,7 +156,7 @@ class NotificationDefaults(BaseConfigModel):
     ntfy_password: Optional[SecretStr] = Field(None, description="Password for Ntfy basic authentication.")
     ntfy_icon: Optional[str] = Field(None, description="URL of an icon to display with the notification.")
     ntfy_click: Optional[str] = Field(None, description="URL to open when the notification is clicked.")
-    ntfy_markdown: Optional[bool] = Field(None, description="Render the notification body as Markdown.")
+    ntfy_markdown: Optional[NormalizedBool] = Field(None, description="Render the notification body as Markdown.")
     ntfy_actions: Optional[List[NtfyAction]] = Field(None, description="List of Ntfy action buttons to attach to the notification.")
     ntfy_headers: Optional[dict] = Field(None, description="Custom HTTP headers to include in the Ntfy request.")
 
@@ -198,14 +204,14 @@ class BufferConfig(BaseConfigModel):
 class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     """Optional overridable settings that can be applied at the container, rule, or keyword level."""
 
-    attach_logfile: Optional[bool] = Field(None, description="Attach recent log lines as a file to the notification.")
+    attach_logfile: Optional[NormalizedBool] = Field(None, description="Attach recent log lines as a file to the notification.")
     trigger_cooldown: Optional[int] = Field(None, description="Minimum seconds between repeated triggers for the same keyword on the same target. `0` disables cooldown.")
     container_action_cooldown: Optional[int] = Field(None, description="Minimum seconds between repeated container actions (restart/stop) on the same target.")
     attachment_lines: Optional[int] = Field(None, description="Number of log lines to include in the log attachment.")
-    hide_full_regex: Optional[bool] = Field(None, description="In notifications, hide the full regex match and only show named capturing groups.")
-    regex_case_sensitive: Optional[bool] = Field(None, description="Whether regex patterns are case-sensitive.")
-    disable_trigger_notifications: Optional[bool] = Field(None, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
-    merge_matches: Optional[bool] = Field(None, description="Combine multiple keyword matches from the same log entry into a single notification.")
+    hide_full_regex: Optional[NormalizedBool] = Field(None, description="In notifications, hide the full regex match and only show named capturing groups.")
+    regex_case_sensitive: Optional[NormalizedBool] = Field(None, description="Whether regex patterns are case-sensitive.")
+    disable_trigger_notifications: Optional[NormalizedBool] = Field(None, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
+    merge_matches: Optional[NormalizedBool] = Field(None, description="Combine multiple keyword matches from the same log entry into a single notification.")
     buffer: Optional[BufferConfig] = Field(None, description="Define buffering conditions to capture subsequent log lines")
 
     @field_validator("buffer", mode="before")
@@ -214,14 +220,14 @@ class ModularDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
 
 class RootDefaultsConfig(EmptyDefaults, ActionCooldownMixin):
     """Global default settings applied to all rules unless overridden at a lower level."""
-    attach_logfile: bool = Field(False, description="Attach recent log lines as a file to the notification.")
+    attach_logfile: NormalizedBool = Field(False, description="Attach recent log lines as a file to the notification.")
     trigger_cooldown: int = Field(0, description="Minimum seconds between repeated triggers for the same keyword on the same target. `0` disables cooldown.")
     container_action_cooldown: int = Field(60, description="Minimum seconds between repeated container actions (restart/stop) on the same target.")
     attachment_lines: int = Field(20, description="Number of log lines to include in the log attachment.")
-    hide_full_regex: bool = Field(False, description="In notifications, hide the full regex match and only show named capturing groups.")
-    regex_case_sensitive: bool = Field(True, description="Whether regex patterns are case-sensitive.")
-    disable_trigger_notifications: bool = Field(False, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
-    merge_matches: bool = Field(False, description="Combine multiple keyword matches from the same log entry into a single notification.")
+    hide_full_regex: NormalizedBool = Field(False, description="In notifications, hide the full regex match and only show named capturing groups.")
+    regex_case_sensitive: NormalizedBool = Field(True, description="Whether regex patterns are case-sensitive.")
+    disable_trigger_notifications: NormalizedBool = Field(False, description="Suppress all trigger notifications. Useful when only container actions or OliveTin actions are needed.")
+    merge_matches: NormalizedBool = Field(False, description="Combine multiple keyword matches from the same log entry into a single notification.")
     buffer: Optional[BufferConfig] = Field(None, description="Define buffering conditions to capture subsequent log lines")
 
     @field_validator("buffer", mode="before")
@@ -243,7 +249,7 @@ class NtfyConfig(BaseConfigModel):
     tags: Optional[str] = Field("kite,mag", description="Comma-separated Ntfy tags or emoji shortcodes to include in the notification header.")
     icon: Optional[str] = Field(None, description="URL of an icon to display with the notification.")
     click: Optional[str] = Field(None, description="URL to open when the notification is clicked.")
-    markdown: Optional[bool] = Field(None, description="Render the notification body as Markdown.")
+    markdown: Optional[NormalizedBool] = Field(None, description="Render the notification body as Markdown.")
     actions: Optional[List[NtfyAction]] = Field(None, description="List of Ntfy action buttons to attach to the notification.")
     headers: Optional[dict] = Field(None, description="Custom HTTP headers to include in the Ntfy request.")
 

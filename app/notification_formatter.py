@@ -31,6 +31,7 @@ def _render_template(template: str, data: Dict[str, Any]) -> str:
         return tmpl.render(**data)
     except Exception as e:
         logger.warning(f"Template rendering failed: {e}")
+        logger.debug("Template rendering traceback", exc_info=True) 
         return template
 
 

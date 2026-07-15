@@ -36,9 +36,16 @@ class TriggerTracker:
         """Check if the keyword is still within its trigger_cooldown period."""
         with self._lock:
             last = self._last_trigger.get(key, 0)
-            on_cooldown = (time.time() - last) < cooldown
+            elapsed = time.time() - last
+            on_cooldown = elapsed < cooldown 
             if on_cooldown:
-                self.logger.debug(f"{self._trigger_type} '{key}' is on cooldown ({cooldown}s). Last triggered {time.time() - last:.1f}s ago.")
+                self.logger.debug(
+                    "%s %r is on cooldown (%ss). Last triggered %.1fs ago.",
+                    self._trigger_type,
+                    key,
+                    cooldown,
+                    elapsed,
+                ) 
             return on_cooldown
 
     def restart_trigger_cooldown(self, key: str | tuple) -> None:
@@ -78,8 +85,15 @@ class TriggerTracker:
             if len(history) >= count:
                 history.clear()
                 return True
-            self.logger.debug(f"{self._trigger_type} '{key}' matched {len(history)} times in the last {timeframe} seconds. {count - len(history)} more matches needed to trigger.")
-
+            self.logger.debug(
+                "%s %r matched %s times in the last %s seconds. "
+                "%s more matches needed to trigger.",
+                self._trigger_type,
+                key,
+                len(history),
+                timeframe,
+                count - len(history),
+            ) 
             return False
 
 

@@ -39,13 +39,18 @@ services:
       loggifly.keywords: "keyword1,keyword2,keyword3"
       loggifly.ignore_keywords: "keyword4,keyword5,keyword6"
       
-      # simple keyword with notification title
+      # simple keyword with notification title and buffer
       loggifly.keywords.0: "critical" 
       loggifly.keywords.0.title_template: "{container}: Critical Alert"
+      loggifly.keywords.0.buffer.seconds: 5
+      loggifly.keywords.0.buffer.mode: "all"
+      loggifly.keywords.0.buffer.max_lines: 10
       
-      # regex with ntfy tags
+      # regex with ntfy tags and trigger_on
       loggifly.keywords.1.regex: 'download.*failed' 
       loggifly.keywords.1.ntfy_tags: "partying_face"
+      loggifly.keywords.1.trigger_on.count: 5
+      loggifly.keywords.1.trigger_on.timeframe: 60
       
       # simple keyword with container_action
       loggifly.keywords.2.keyword: "timeout" 

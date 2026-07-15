@@ -50,6 +50,9 @@ Maps to the `global.defaults:` section in the config.yaml.
 | `REGEX_CASE_SENSITIVE` | `bool` | `true` | Whether regex patterns are case-sensitive. | `global.defaults.regex_case_sensitive` |
 | `DISABLE_TRIGGER_NOTIFICATIONS` | `bool` | `false` | Suppress all notifications. Useful when only container actions or OliveTin actions are needed. | `global.defaults.disable_trigger_notifications` |
 | `MERGE_MATCHES` | `bool` | `false` | Combine multiple keyword matches from the same log entry into a single notification. | `global.defaults.merge_matches` |
+| `BUFFER_SECONDS` | `int` | `0` | Number of seconds to buffer subsequent log lines before triggering and sending the notification. | `global.defaults.buffer.seconds` |
+| `BUFFER_MODE` | `string` | `matching` | One of `matching` or `all`. `matching` collects only subsequent log lines that match the same keyword. `all` collects all subsequent log lines. Default is `matching`. | `global.defaults.buffer.mode` |
+| `BUFFER_MAX_LINES` | `int` | `-` | Optional. Maximum number of log lines to buffer before sending a notification. | `global.defaults.buffer.max_lines` |
 
 ## Notifications
 
@@ -103,6 +106,7 @@ Shortcuts to configure Docker Swarm service monitoring without a config file. Ma
 |----------|------|---------|-------------|
 | `CONFIG_PATH` | `string` | `/config/config.yaml` | Path to the YAML config file inside the container. |
 | `DOCKER_HOST` | `string` | `–` | Docker socket or TCP address to connect to (e.g. `tcp://remote-host:2375`). Defaults to the local socket. |
+| `LOGGIFLY_DOCKER_POOL_MAXSIZE` | `int` | `64` | Maximum number of HTTP(S) connections retained per TCP Docker host for reuse. Additional connections remain allowed. Does not apply to Unix, SSH, or named-pipe transports. |
 | `LOGGIFLY_MODE` | `string` | `–` | Set to `swarm` to get additional context in notifications about which node the container that has triggered a notification is running on. |
 | `STRICT_CONFIG` | `bool` | `true` | Make unknown config fields raise an error instead of a warning. |
 | `DEBUG_TARGET_CONFIG` | `bool` | `false` | Enable detailed logging showing the effective target config for each target (debug logging needs to be enabled) |

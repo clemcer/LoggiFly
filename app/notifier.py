@@ -268,9 +268,10 @@ def send_webhook(json_data: dict, webhook_config: dict):
         if response.status_code == 200:
             logger.info(f"Webhook sent successfully.")
         else:
-            logger.error("Error while trying to send POST request to custom webhook: %s", response.text)
+            logger.error(f"Webhook request failed with HTTP status {response.status_code}")
+            logger.debug(f"Webhook response body: {response.text}")
     except requests.RequestException as e:
-        logger.error(f"Error trying to send webhook to url: {url}, headers: {headers}: %s", e)
+        logger.error(f"Error trying to send webhook to url: {url}, headers: {headers}: {e}")
 
 def send_notification(
     config: RootConfig, 

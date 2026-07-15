@@ -13,6 +13,7 @@ from config.models.base import (
     TriggerActionsBase,
     _validation_ctx,
     TriggerOnBase,
+    NormalizedBool
 )
 from config.helpers import (
     validate_container_events,
@@ -50,7 +51,7 @@ class ContainerEventBase(BaseConfigModel):
 class RuleBase(KeywordBase, ContainerEventBase, ModularDefaultsConfig):
     """Base class for container and Swarm monitoring rules."""
     id: Optional[str] = Field(None, description="Unique identifier for this rule. Auto-generated if not provided.")
-    enabled: bool = Field(True, description="Whether this rule is active.")
+    enabled: NormalizedBool = Field(True, description="Whether this rule is active.")
     scope: Optional[ScopeConfig] = Field(None, description="Restrict this rule to specific Docker hosts.")
 
 
@@ -198,8 +199,8 @@ class LabelConfig(KeywordBase, ContainerEventBase, ModularDefaultsConfig):
     model_config = ConfigDict(extra="ignore")
 
     # these should not be logged as missing fields (via validator function in BaseConfigModel)
-    monitor: Optional[bool] = None
-    ignore_config: Optional[bool] = None
+    monitor: Optional[NormalizedBool] = None
+    ignore_config: Optional[NormalizedBool] = None
 
     @model_validator(mode="wrap")
     @classmethod

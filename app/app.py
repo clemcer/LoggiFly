@@ -7,6 +7,7 @@ import logging
 import traceback
 import docker
 import docker.errors
+from requests.adapters import HTTPAdapter
 from threading import Timer
 from dataclasses import dataclass
 import socket
@@ -35,6 +36,8 @@ logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 logging.getLogger("docker").setLevel(logging.INFO)
 logging.getLogger("watchdog").setLevel(logging.WARNING)
 
+DEFAULT_DOCKER_POOL_MAXSIZE = 64
+
 
 @dataclass
 class DockerClientInfo:
@@ -44,6 +47,46 @@ class DockerClientInfo:
     label: str | None
     hostname: str
     monitor: DockerLogMonitor | None = None
+
+
+def configure_docker_tcp_pool(client: docker.DockerClient, pool_maxsize: int) -> bool:
+    """Replace the standard HTTP(S) adapter, changing only its pool size."""
+    base_url = client.api.base_url
+    if base_url.startswith("https://"):
+        prefix = "https://"
+    elif base_url.startswith("http://"):
+        prefix = "http://"
+    else:
+        # Unix, npipe, and SSH clients use Docker SDK transport adapters.
+        return False
+
+    old_adapter = client.api.get_adapter(prefix)
+    client.api.mount(prefix, HTTPAdapter(pool_maxsize=pool_maxsize))
+    old_adapter.close()
+    return True
+
+
+def create_docker_client(
+    host_url: str,
+    tls_config: TLSConfig | None,
+    timeout: int | None = None,
+) -> docker.DockerClient:
+    """Create a Docker client with the configured HTTP(S) pool size."""
+    client_kwargs = {"base_url": host_url, "tls": tls_config}
+    if timeout is not None:
+        client_kwargs["timeout"] = timeout
+    client = docker.DockerClient(**client_kwargs)
+    pool_maxsize = convert_to_int(
+        get_env_var(
+            "DOCKER_POOL_MAXSIZE",
+            fallback_value=str(DEFAULT_DOCKER_POOL_MAXSIZE),
+        ),
+        fallback_value=DEFAULT_DOCKER_POOL_MAXSIZE,
+        min_value=1,
+    )
+    if configure_docker_tcp_pool(client, pool_maxsize):
+        logging.info(f"Configured Docker TCP pool size to {pool_maxsize} for host {host_url}")
+    return client
 
 
 def get_title_prefix(docker_hosts: List[DockerClientInfo]) -> str:
@@ -248,7 +291,7 @@ def check_monitor_status(docker_host_infos: List[DockerClientInfo], global_shutd
                         return
                     new_client = None
                     try:    
-                        new_client = docker.DockerClient(base_url=host_url, tls=tls_config)
+                        new_client = create_docker_client(host_url, tls_config)
                     except docker.errors.DockerException as e:
                         logging.warning(f"Could not reconnect to {host_url} ({label}): {e}")
                     except Exception as e:
@@ -341,13 +384,13 @@ def create_docker_clients() -> list[DockerClientInfo]:
         try:
             if "podman" in host_url:
                 # Podman workaround: set short timeout for initial ping, then increase for log streaming.
-                client = docker.DockerClient(base_url=host_url, tls=tls_config, timeout=10)
+                client = create_docker_client(host_url, tls_config, timeout=10)
                 if client.ping():
                     logging.info(f"Successfully connected to Podman client on {host_url}")
                     client.close()
-                    client = docker.DockerClient(base_url=host_url, tls=tls_config, timeout=300)
+                    client = create_docker_client(host_url, tls_config, timeout=300)
             else:
-                client = docker.DockerClient(base_url=host_url, tls=tls_config, timeout=10)
+                client = create_docker_client(host_url, tls_config, timeout=10)
             if label: 
                 hostname = label
             else:
@@ -361,8 +404,8 @@ def create_docker_clients() -> list[DockerClientInfo]:
                         hostname = f"{parsed.hostname}"
                     logging.warning(
                         f"Could not get hostname for {host_url}. LoggiFly will call this host '{hostname}' in notifications and logging to differentiate it from other hosts."
-                        f"\nThis may occur if using a Socket Proxy that does not allow to retrieve the hostname via the docker client"
-                        f"\nYou can also set a label in DOCKER_HOST as 'tcp://host:2375|label' that will be used as a hostname"
+                        "\nThis may occur if using a Socket Proxy that does not allow to retrieve the hostname via the docker client"
+                        "\nYou can also set a label in DOCKER_HOST as 'tcp://host:2375|label' that will be used as a hostname"
                         f"\nError details: {e}")    
             docker_hosts.append(
                 DockerClientInfo(
