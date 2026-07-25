@@ -289,16 +289,16 @@ def send_notification(
     nc = config.notifications.model_dump(exclude_none=True)
     trigger_context = trigger_context or {}
     ntfy_config = get_notification_config(trigger_context, nc.get("ntfy") or {}, NTFY_PREFIX, NTFY_KEYS)
-    apprise_url = get_notification_config(trigger_context, nc.get("apprise") or {}, APPRISE_PREFIX, APPRISE_KEYS).get("url")
+    apprise_urls = get_notification_config(trigger_context, nc.get("apprise") or {}, APPRISE_PREFIX, APPRISE_KEYS).get("urls")
     webhook_config = get_notification_config(trigger_context, nc.get("webhook") or {}, WEBHOOK_PREFIX, WEBHOOK_KEYS)
 
     # Send ntfy notification if configured
     if ntfy_config and ntfy_config.get("url") and ntfy_config.get("topic"):
         send_ntfy_notification(ntfy_config, message=message, title=title, attachment=attachment)
-    # Send Apprise notification if configured   
-    if apprise_url:
-        send_apprise_notification(apprise_url, message=message, title=title, attachment=attachment)
-    
+    # Send Apprise notification if configured
+    for url in apprise_urls:
+        send_apprise_notification(url, message=message, title=title, attachment=attachment)
+
     # Send webhook notification if configured
     if (webhook_config and webhook_config.get("url")):
         if notification_context:

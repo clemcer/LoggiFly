@@ -160,7 +160,7 @@ class NotificationDefaults(BaseConfigModel):
     ntfy_actions: Optional[List[NtfyAction]] = Field(None, description="List of Ntfy action buttons to attach to the notification.")
     ntfy_headers: Optional[dict] = Field(None, description="Custom HTTP headers to include in the Ntfy request.")
 
-    apprise_url: Optional[SecretStr] = Field(None, description="Apprise-compatible notification URL (supports 100+ services).")
+    apprise_urls: Optional[List[SecretStr]] = Field(None, description="Apprise-compatible notification URLs (supports 100+ services).")
 
     webhook_url: Optional[str] = Field(None, description="HTTP endpoint to POST notification payloads to.")
     webhook_headers: Optional[dict] = Field(None, description="Custom HTTP headers for webhook requests.")
@@ -174,6 +174,15 @@ class NotificationDefaults(BaseConfigModel):
     @field_validator("ntfy_priority", mode="before")
     def validate_priority(cls, v):
         return validate_ntfy_priority(v)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_apprise_url_to_urls(cls, data: dict) -> dict:
+        if isinstance(data, dict):
+            if "apprise_url" in data:
+                data["apprise_urls"] = data.get("apprise_urls", []) + [data.pop("apprise_url")]
+
+        return data
 
 class EmptyDefaults(NotificationDefaults):
     """Shared optional settings for notifications and template customization."""
@@ -265,7 +274,16 @@ class NtfyConfig(BaseConfigModel):
 
 class AppriseConfig(BaseConfigModel):
     """Configuration for the Apprise multi-service notification library."""
-    url: SecretStr = Field(description="Apprise-compatible notification URL (supports 100+ services).")
+    urls: List[SecretStr] = Field(description="Apprise-compatible notification URLs (supports 100+ services).")
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_url_to_urls(cls, data: dict) -> dict:
+        if isinstance(data, dict):
+            if "url" in data:
+                data["urls"] = data.get("urls", []) + [data.pop("url")]
+
+        return data
 
 class WebhookConfig(BaseConfigModel):
     """Configuration for webhook-based notifications."""
