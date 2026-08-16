@@ -78,7 +78,7 @@ If you find LoggiFly useful, drop a ⭐️ on the repo or buy me a coffee!
 
 # Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=clemcer/loggifly&type=Date)](https://www.star-history.com/#clemcer/loggifly&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=clemcer/loggifly&type=Date)](https://star-history.dera.page/#clemcer/loggifly&Date)
 
 ## License
 [MIT](https://github.com/clemcer/LoggiFly/blob/main/LICENSE)
