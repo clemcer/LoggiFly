@@ -2,6 +2,6 @@ docker==7.2.0
 requests==2.34.2
 pyyaml==6.0.3
 watchdog==6.0.0
-apprise==1.12.0
+apprise==1.13.1
 pydantic==2.13.4
 Jinja2==3.1.6
