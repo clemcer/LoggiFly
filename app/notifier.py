@@ -3,6 +3,9 @@ import apprise
 import os
 import base64
 import logging
+import tempfile
+import weakref
+from apprise.attachment.file import AttachFile
 from pydantic import SecretStr
 import urllib.parse
 from email.header import Header
@@ -24,6 +27,8 @@ WEBHOOK_KEYS = set(WebhookConfig.model_fields.keys())
 NTFY_PREFIX = NotificationPrefix.NTFY.value
 APPRISE_PREFIX = NotificationPrefix.APPRISE.value
 WEBHOOK_PREFIX = NotificationPrefix.WEBHOOK.value
+
+_APPRISE_ATTACHMENT_DIRS = ("/dev/shm", "/tmp")
 
 
 def emoji_to_rfc2047(match):
@@ -160,13 +165,58 @@ def _log_apprise_result(result: apprise.AppriseResult) -> None:
     )
 
 
+def _cleanup_apprise_attachment(directory: tempfile.TemporaryDirectory) -> None:
+    try:
+        directory.cleanup()
+    except OSError:
+        logger.warning("Could not remove temporary Apprise attachment directory.")
+
+
+def _create_apprise_attachment(attachment: LogAttachment) -> AttachFile | None:
+    """Give each send its own file, owned by the Apprise attachment object."""
+    # A display name must never become an absolute path or escape our directory.
+    file_name = os.path.basename(attachment.file_name.replace("\\", "/"))
+    file_name = "".join(char for char in file_name if char.isprintable())
+    if file_name in ("", ".", ".."):
+        file_name = "logs.log"
+
+    for base_dir in _APPRISE_ATTACHMENT_DIRS:
+        directory = None
+        try:
+            # /dev/shm normally remains writable in a read-only container.
+            directory = tempfile.TemporaryDirectory(
+                prefix="loggifly-apprise-", dir=base_dir
+            )
+            file_path = os.path.join(directory.name, file_name)
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(attachment.content)
+
+            file_attachment = AttachFile(file_path, name=file_name, mimetype="text/plain")
+            # notify() may return on timeout while a worker still holds this
+            # attachment. Delete its directory only after the last reference
+            # to the attachment is released, not when notify() returns.
+            weakref.finalize(file_attachment, _cleanup_apprise_attachment, directory)
+            directory = None  # Ownership has passed to the finalizer.
+            return file_attachment
+        except (OSError, UnicodeError):
+            logger.warning("Could not prepare Apprise attachment in %s.", base_dir)
+        finally:
+            if directory is not None:
+                _cleanup_apprise_attachment(directory)
+
+    logger.error(
+        "Could not prepare Apprise log attachment; sending notification without attachment."
+    )
+    return None
+
+
 def send_apprise_notification(url, message, title, attachment: LogAttachment | None = None):
     """
     Send a notification using Apprise.
     Optionally attaches a file. Message is truncated if too long.
     """
     message = ("This message had to be shortened: \n" if len(message) > 1900 else "") + message[:1900]
-    file_path = None
+    file_attachment = None
     try:
         apobj = apprise.Apprise()
         all_targets_loaded = apobj.add(url)
@@ -186,41 +236,19 @@ def send_apprise_notification(url, message, title, attachment: LogAttachment | N
                 loaded_count,
             )
 
-        if attachment:
-            file_content = attachment.content
-            file_name = attachment.file_name
-            # /dev/shm works even when the container is read_only
-            file_path = None
-            try:
-                file_path = os.path.join("/dev/shm", file_name)
-                with open(file_path, "w") as tmp_file:
-                    tmp_file.write(file_content)
-                    tmp_file.flush()
-            except Exception:
-                logger.error("Error trying to write attachment file to /dev/shm")
-                try:
-                    file_path = os.path.join("/tmp", file_name)
-                    with open(file_path, "w") as tmp_file:
-                        tmp_file.write(file_content)
-                        tmp_file.flush()
-                except Exception:
-                    logger.error("Error trying to write attachment file to /tmp")
-                    
+        file_attachment = _create_apprise_attachment(attachment) if attachment else None
         with apobj.notify(
             title=title,
             body=message,
-            attach=file_path if file_path and os.path.exists(file_path) else None,
+            attach=file_attachment,
         ) as result:
             _log_apprise_result(result)
     except Exception as e:
         logger.error("Error while trying to send apprise-notification: %s", e)
     finally:
-        # Clean up temporary attachment file if it exists
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
+        # Release our reference even if an exception traceback retains this
+        # frame. Running Apprise workers keep their own attachment references.
+        file_attachment = None
 
 
 def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachment | None =None):
