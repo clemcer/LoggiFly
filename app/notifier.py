@@ -135,7 +135,23 @@ def send_apprise_notification(url, message, title, attachment: LogAttachment | N
     file_path = None
     try:
         apobj = apprise.Apprise()
-        apobj.add(url)
+        all_targets_loaded = apobj.add(url)
+        loaded_count = len(apobj)
+
+        if loaded_count == 0:
+            logger.error(
+                "Apprise configuration error: no valid notification targets loaded. "
+                "Skipping notification."
+            )
+            return
+
+        if not all_targets_loaded:
+            logger.error(
+                "Apprise configuration error: some notification targets "
+                "could not be loaded. Continuing with %d valid target(s).",
+                loaded_count,
+            )
+
         if attachment:
             file_content = attachment.content
             file_name = attachment.file_name
@@ -167,7 +183,7 @@ def send_apprise_notification(url, message, title, attachment: LogAttachment | N
                 body=message,
             )
         if result:
-            logger.info("Apprise-Notification sent successfully")
+            logger.info("Apprise notification sent successfully to all loaded targets.")
         else:
             logger.error("Error trying to send apprise-notification")
     except Exception as e:
