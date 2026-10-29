@@ -126,6 +126,40 @@ def get_notification_config(modular_settings: dict, global_service_config: dict,
         dict_merge=False,
     )
 
+def _log_apprise_result(result: apprise.AppriseResult) -> None:
+    """Summarize delivery without exposing destination URLs or captured logs."""
+    status_messages = {
+        apprise.AppriseResultStatus.SUCCESS: (
+            logging.INFO, "Apprise notification succeeded for loaded targets."
+        ),
+        apprise.AppriseResultStatus.PARTIAL: (
+            logging.WARNING, "Apprise notification was only partially delivered."
+        ),
+        apprise.AppriseResultStatus.FAILURE: (
+            logging.ERROR, "Apprise notification failed."
+        ),
+        apprise.AppriseResultStatus.NOMATCH: (
+            logging.ERROR, "Apprise notification was not sent: no matching targets."
+        ),
+        apprise.AppriseResultStatus.TIMEOUT: (
+            logging.ERROR,
+            "Apprise notification timed out; delivery may still complete later.",
+        ),
+    }
+    level, message = status_messages[result.status]
+    # Apprise's failed_count includes services whose outcome is TIMEOUT.
+    logger.log(
+        level,
+        "%s Status=%s; services: successful=%d, unsuccessful=%d "
+        "(including timeouts=%d).",
+        message,
+        result.status.name,
+        result.success_count,
+        result.failed_count,
+        result.timeout_count,
+    )
+
+
 def send_apprise_notification(url, message, title, attachment: LogAttachment | None = None):
     """
     Send a notification using Apprise.
@@ -172,20 +206,12 @@ def send_apprise_notification(url, message, title, attachment: LogAttachment | N
                 except Exception:
                     logger.error("Error trying to write attachment file to /tmp")
                     
-            result = apobj.notify(
-                title=title,
-                body=message,
-                attach=file_path if file_path and os.path.exists(file_path) else None # type: ignore
-            )
-        else:
-            result = apobj.notify(
-                title=title,
-                body=message,
-            )
-        if result:
-            logger.info("Apprise notification sent successfully to all loaded targets.")
-        else:
-            logger.error("Error trying to send apprise-notification")
+        with apobj.notify(
+            title=title,
+            body=message,
+            attach=file_path if file_path and os.path.exists(file_path) else None,
+        ) as result:
+            _log_apprise_result(result)
     except Exception as e:
         logger.error("Error while trying to send apprise-notification: %s", e)
     finally:
