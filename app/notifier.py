@@ -3,8 +3,10 @@ import apprise
 import os
 import base64
 import logging
+import tempfile
+import weakref
+from apprise.attachment.file import AttachFile
 from pydantic import SecretStr
-import urllib.parse
 from email.header import Header
 from constants import EMOJI_PATTERN, NotificationPrefix
 from notification_formatter import NotificationContext
@@ -25,6 +27,10 @@ NTFY_PREFIX = NotificationPrefix.NTFY.value
 APPRISE_PREFIX = NotificationPrefix.APPRISE.value
 WEBHOOK_PREFIX = NotificationPrefix.WEBHOOK.value
 
+_APPRISE_ATTACHMENT_DIRS = ("/dev/shm", "/tmp")
+_MESSAGE_SHORTENED_SUFFIX = "\n[message shortened]"
+_NTFY_ATTACHMENT_MESSAGE_MAX_LENGTH = 1000
+
 
 def emoji_to_rfc2047(match):
     """Convert the matched emoji to RFC 2047 encoding."""
@@ -34,6 +40,33 @@ def emoji_to_rfc2047(match):
 def replace_emojis_with_rfc2047(text):
     """Replace all emojis in a text with RFC 2047 encoded forms."""
     return EMOJI_PATTERN.sub(emoji_to_rfc2047, text)
+
+
+def _truncate_message(message: str, max_length: int) -> str:
+    """Limit body characters, counting the marker within the same budget."""
+    if max_length == 0 or len(message) <= max_length:
+        return message
+    if max_length < len(_MESSAGE_SHORTENED_SUFFIX):
+        return message[:max_length - 1] + "…"
+    return message[:max_length - len(_MESSAGE_SHORTENED_SUFFIX)] + _MESSAGE_SHORTENED_SUFFIX
+
+
+def _encode_rfc2047_message(message: str) -> str:
+    """Encode Unicode/newlines as single-line RFC 2047 encoded words."""
+    words = []
+    chunk = bytearray()
+    for char in message:
+        encoded = char.encode("utf-8")
+        # 45 raw bytes give at most 72 ASCII characters per encoded word,
+        # below RFC 2047's 75-character limit. Never split a UTF-8 character.
+        if len(chunk) + len(encoded) > 45:
+            words.append("=?utf-8?b?" + base64.b64encode(chunk).decode("ascii") + "?=")
+            chunk.clear()
+        chunk.extend(encoded)
+    if chunk:
+        words.append("=?utf-8?b?" + base64.b64encode(chunk).decode("ascii") + "?=")
+    return " ".join(words)
+
 
 def build_ntfy_action_header(actions: list) -> str:
     def _needs_quotes(s: str) -> bool:
@@ -126,67 +159,129 @@ def get_notification_config(modular_settings: dict, global_service_config: dict,
         dict_merge=False,
     )
 
+def _log_apprise_result(result: apprise.AppriseResult) -> None:
+    """Summarize delivery without exposing destination URLs or captured logs."""
+    status_messages = {
+        apprise.AppriseResultStatus.SUCCESS: (
+            logging.INFO, "Apprise notification succeeded for loaded targets."
+        ),
+        apprise.AppriseResultStatus.PARTIAL: (
+            logging.WARNING, "Apprise notification was only partially delivered."
+        ),
+        apprise.AppriseResultStatus.FAILURE: (
+            logging.ERROR, "Apprise notification failed."
+        ),
+        apprise.AppriseResultStatus.NOMATCH: (
+            logging.ERROR, "Apprise notification was not sent: no matching targets."
+        ),
+        apprise.AppriseResultStatus.TIMEOUT: (
+            logging.ERROR,
+            "Apprise notification timed out; delivery may still complete later.",
+        ),
+    }
+    level, message = status_messages[result.status]
+    # Apprise's failed_count includes services whose outcome is TIMEOUT.
+    logger.log(
+        level,
+        "%s Status=%s; services: successful=%d, unsuccessful=%d "
+        "(including timeouts=%d).",
+        message,
+        result.status.name,
+        result.success_count,
+        result.failed_count,
+        result.timeout_count,
+    )
+
+
+def _cleanup_apprise_attachment(directory: tempfile.TemporaryDirectory) -> None:
+    try:
+        directory.cleanup()
+    except OSError:
+        logger.warning("Could not remove temporary Apprise attachment directory.")
+
+
+def _create_apprise_attachment(attachment: LogAttachment) -> AttachFile | None:
+    """Give each send its own file, owned by the Apprise attachment object."""
+    # A display name must never become an absolute path or escape our directory.
+    file_name = os.path.basename(attachment.file_name.replace("\\", "/"))
+    file_name = "".join(char for char in file_name if char.isprintable())
+    if file_name in ("", ".", ".."):
+        file_name = "logs.log"
+
+    for base_dir in _APPRISE_ATTACHMENT_DIRS:
+        directory = None
+        try:
+            # /dev/shm normally remains writable in a read-only container.
+            directory = tempfile.TemporaryDirectory(
+                prefix="loggifly-apprise-", dir=base_dir
+            )
+            file_path = os.path.join(directory.name, file_name)
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(attachment.content)
+
+            file_attachment = AttachFile(file_path, name=file_name, mimetype="text/plain")
+            # notify() may return on timeout while a worker still holds this
+            # attachment. Delete its directory only after the last reference
+            # to the attachment is released, not when notify() returns.
+            weakref.finalize(file_attachment, _cleanup_apprise_attachment, directory)
+            directory = None  # Ownership has passed to the finalizer.
+            return file_attachment
+        except (OSError, UnicodeError):
+            logger.warning("Could not prepare Apprise attachment in %s.", base_dir)
+        finally:
+            if directory is not None:
+                _cleanup_apprise_attachment(directory)
+
+    logger.error(
+        "Could not prepare Apprise log attachment; sending notification without attachment."
+    )
+    return None
+
+
 def send_apprise_notification(url, message, title, attachment: LogAttachment | None = None):
     """
     Send a notification using Apprise.
-    Optionally attaches a file. Message is truncated if too long.
+    Optionally attaches a file. Service-specific overflow is configured via URLs.
     """
-    message = ("This message had to be shortened: \n" if len(message) > 1900 else "") + message[:1900]
-    file_path = None
+    file_attachment = None
     try:
         apobj = apprise.Apprise()
-        apobj.add(url)
-        if attachment:
-            file_content = attachment.content
-            file_name = attachment.file_name
-            # /dev/shm works even when the container is read_only
-            file_path = None
-            try:
-                file_path = os.path.join("/dev/shm", file_name)
-                with open(file_path, "w") as tmp_file:
-                    tmp_file.write(file_content)
-                    tmp_file.flush()
-            except Exception:
-                logger.error("Error trying to write attachment file to /dev/shm")
-                try:
-                    file_path = os.path.join("/tmp", file_name)
-                    with open(file_path, "w") as tmp_file:
-                        tmp_file.write(file_content)
-                        tmp_file.flush()
-                except Exception:
-                    logger.error("Error trying to write attachment file to /tmp")
-                    
-            result = apobj.notify(
-                title=title,
-                body=message,
-                attach=file_path if file_path and os.path.exists(file_path) else None # type: ignore
+        all_targets_loaded = apobj.add(url)
+        loaded_count = len(apobj)
+
+        if loaded_count == 0:
+            logger.error(
+                "Apprise configuration error: no valid notification targets loaded. "
+                "Skipping notification."
             )
-        else:
-            result = apobj.notify(
-                title=title,
-                body=message,
+            return
+
+        if not all_targets_loaded:
+            logger.error(
+                "Apprise configuration error: some notification targets "
+                "could not be loaded. Continuing with %d valid target(s).",
+                loaded_count,
             )
-        if result:
-            logger.info("Apprise-Notification sent successfully")
-        else:
-            logger.error("Error trying to send apprise-notification")
+
+        file_attachment = _create_apprise_attachment(attachment) if attachment else None
+        with apobj.notify(
+            title=title,
+            body=message,
+            attach=file_attachment,
+        ) as result:
+            _log_apprise_result(result)
     except Exception as e:
         logger.error("Error while trying to send apprise-notification: %s", e)
     finally:
-        # Clean up temporary attachment file if it exists
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
+        # Release our reference even if an exception traceback retains this
+        # frame. Running Apprise workers keep their own attachment references.
+        file_attachment = None
 
 
 def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachment | None =None):
     """
     Send a notification via ntfy with optional file attachment.
     """
-    message = ("This message had to be shortened: \n" if len(message) > 3900 else "") + message[:3900]
-    
     title = replace_emojis_with_rfc2047(title)
     title = title.replace("\n", " ").strip() if title else ""
 
@@ -222,26 +317,28 @@ def send_ntfy_notification(ntfy_config, message, title, attachment: LogAttachmen
         if attachment:
             file_content = attachment.content.encode("utf-8")
             headers["Filename"] = attachment.file_name
-            # When attaching a file the message can not be passed normally.
-            # So if the message is short, include it as query param, else omit it
-            if len(message) < 199:
-                response = requests.post(
-                    f"{ntfy_config['url']}/{ntfy_config['topic']}?message={urllib.parse.quote(message)}",
-                    data=file_content,
-                    headers=headers,
-                    timeout=10
-                )
-            else:
-                response = requests.post(
-                    f"{ntfy_config['url']}/{ntfy_config['topic']}",
-                    data=file_content,
-                    headers=headers,
-                    timeout=10
-                )
+            # The body carries the file; send the shortened caption as a header.
+            # Remove custom aliases so they cannot override the caption.
+            headers = {
+                key: value for key, value in headers.items()
+                if key.lower() not in {"x-message", "message", "m"}
+            }
+
+            # The body is already used for the log file. Keep the caption short
+            # because it must travel in a header.
+            caption = _truncate_message(message, _NTFY_ATTACHMENT_MESSAGE_MAX_LENGTH)
+            headers["X-Message"] = _encode_rfc2047_message(caption)
+
+            response = requests.post(
+                f"{ntfy_config['url']}/{ntfy_config['topic']}",
+                data=file_content,
+                headers=headers,
+                timeout=10
+            )
         else:
             response = requests.post(
                 f"{ntfy_config['url']}/{ntfy_config['topic']}",
-                data=message,
+                data=message.encode("utf-8"),
                 headers=headers,
                 timeout=10
             )
@@ -286,6 +383,13 @@ def send_notification(
     Handles message formatting, file attachments, and host labeling.
     """
     message = message.replace(r"\n", "\n").strip() if message else ""
+    original_length = len(message)
+    message = _truncate_message(message, config.settings.max_message_length)
+    if len(message) < original_length:
+        logger.warning(
+            "Notification message shortened from %d to %d characters.",
+            original_length, len(message),
+        )
     nc = config.notifications.model_dump(exclude_none=True)
     trigger_context = trigger_context or {}
     ntfy_config = get_notification_config(trigger_context, nc.get("ntfy") or {}, NTFY_PREFIX, NTFY_KEYS)

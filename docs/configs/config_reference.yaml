@@ -136,6 +136,7 @@ global:
 settings:
   log_level: INFO                     # DEBUG | INFO | WARNING | ERROR
   multi_line_entries: true            # group multi-line log entries before matching
+  max_message_length: 20000           # Global notification body limit in characters, including shortening marker; 0 disables
   reload_config: true                 # auto-reload config.yaml on file changes
   compact_summary_message: false      # format summary of monitored targets as comma-separated list instead of multi-line
   

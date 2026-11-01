@@ -21,6 +21,7 @@ Maps to the `settings:` section in the config.yaml.
 | `SYSTEM_NOTIFICATIONS` | `bool` | `true` | Shortcut to enable or disable all system notifications. | `settings.system_notifications` |
 | `COMPACT_SUMMARY_MESSAGE` | `bool` | `false` | Send a shorter summary notification instead of a full message. | `settings.compact_summary_message` |
 | `RELOAD_CONFIG` | `bool` | `true` | Automatically reload configuration when the config file changes. | `settings.reload_config` |
+| `MAX_MESSAGE_LENGTH` | `int` | `20000` | Maximum notification body length in characters, including the shortening marker. `0` disables global shortening. Titles, attachments and additional webhook fields are excluded. | `settings.max_message_length` |
 
 ## Global Keywords
 
