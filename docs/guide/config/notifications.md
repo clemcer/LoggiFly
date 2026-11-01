@@ -170,6 +170,16 @@ notifications:
     url: "discord://webhook-url"
 ```
 
+::: info Multiple destinations
+Separate multiple Apprise URLs with commas in the same `url` string. Notifications are sent to all configured destinations. The same syntax works with `APPRISE_URL`.
+
+```yaml
+notifications:
+  apprise:
+    url: "discord://WEBHOOK_ID/WEBHOOK_TOKEN,tgram://BOT_TOKEN/CHAT_ID"
+```
+:::
+
 ### Message length and overflow
 
 LoggiFly applies the global [`settings.max_message_length`](./settings#fields-reference) limit before calling Apprise. Destination limits, formatting and splitting are handled by Apprise.
