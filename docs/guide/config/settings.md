@@ -13,6 +13,7 @@ settings:
   reload_config: true
   system_notifications: true
   compact_summary_message: false
+  max_message_length: 20000
 ```
 
 ### Fields Reference
@@ -24,6 +25,8 @@ settings:
 | `reload_config` | `true` | Automatically reload the config when the `config.yaml` file is changed. |
 | `system_notifications` | See Below | Control LoggiFly's own status notifications (startup, shutdown, config reload, monitor events). See below. |
 | `compact_summary_message` | `false` | Format summary of monitored targets as comma-separated list instead of multi-line. |
+| `max_message_length` | `20000` | Maximum notification body length in characters, including the shortening marker. Set to `0` to disable. Applies globally to ntfy, Apprise and webhooks. |
+
 
 ### `system_notifications`
 

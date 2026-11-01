@@ -82,6 +82,7 @@ class SettingsConfig(BaseConfigModel):
     multi_line_entries: NormalizedBool = Field(True, description="Catch log entries that span multiple lines instead of going line by line.")
     compact_summary_message: NormalizedBool = Field(False, description="Get a comma-separated list of monitored targets instead of a multi-line list in startup and config reload notifications.")
     reload_config: NormalizedBool = Field(True, description="Automatically reload configuration when the config file changes.")
+    max_message_length: int = Field(20000, ge=0, description="Maximum notification body length in characters, including any shortening marker. Applies to all notification services. Set to 0 to disable. Titles, attachments and extra webhook fields are not limited.")
     system_notifications: SystemNotifications | NormalizedBool = Field(SystemNotifications(), description="System notifications settings. Can be set to a boolean to enable or disable all notifications or to a SystemNotifications object to enable or disable specific notifications.") # type: ignore[call-arg]
 
     def is_notification_enabled(self, type_string: str) -> bool:

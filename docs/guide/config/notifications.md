@@ -32,6 +32,7 @@ All notification settings can also be applied individually per container or per 
 
 See full configuration example below
 
+
 ### Configuration Options
 
 | Name | Required | Description |
@@ -144,6 +145,10 @@ notifications:
       X-Custom-Header: "Test123"
 ```
 
+::: info Message length
+Set [`settings.max_message_length`](./settings#fields-reference) to control message length (default: 20,000 characters; `0` disables this limit). ntfy itself also has a message limit, that when exceeded will send the message as an attachment.
+To avoid the message being lost when LoggiFly attaches a log file (due to `attach_logfile: true`), the accompanying text is additionally limited to **1,000 characters**. The log file itself is not shortened.
+:::
 
 ## Apprise
 
@@ -164,6 +169,29 @@ notifications:
   apprise:
     url: "discord://webhook-url"
 ```
+
+### Message length and overflow
+
+LoggiFly applies the global [`settings.max_message_length`](./settings#fields-reference) limit before calling Apprise. Destination limits, formatting and splitting are handled by Apprise.
+
+To control oversized messages, configure `overflow` in each destination URL:
+
+| URL option | Behavior |
+| --- | --- |
+| `overflow=split` | Split long text into multiple messages according to the destination's limits. Recommended when retaining more content is important. |
+| `overflow=truncate` | Shorten text to the destination's limit. |
+| `overflow=upstream` | Leave destination overflow handling to the provider; it may accept, shorten or reject the message. |
+
+```yaml
+notifications:
+  apprise:
+    url: "discord://WEBHOOK_ID/WEBHOOK_TOKEN?overflow=split"
+```
+
+If a URL already contains query parameters, append `&overflow=split` instead of `?overflow=split`. These options do not undo shortening already performed by the global LoggiFly limit.
+
+Apprise's base default is `upstream`; individual notification services may differ.
+
 
 ## Custom Webhooks
 
@@ -195,4 +223,4 @@ For non-system notifications, it also sends `info_fields` which are [these alway
 :::
 ::: warning
 The webhook feature may be expanded on in the future and can be subject to change.
-::: 
+:::
