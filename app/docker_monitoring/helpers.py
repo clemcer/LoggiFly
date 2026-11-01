@@ -404,13 +404,15 @@ def parse_event_type(event: dict) -> str | None:
     """
     if not event:
         return None
-    action = event.get("Action", "").strip()
-    status = event.get("status", "").strip()
+    
+    action = str(event.get("Action") or event.get("status") or "").strip()
     exit_code = event.get("Actor", {}).get("Attributes", {}).get("exitCode")
-    if status.startswith("health_status"):
-        parts = status.split(":", 1)
+
+    if action.startswith("health_status"):
+        parts = action.split(":", 1)
         if len(parts) == 2:
             return parts[1].strip()  # -> "healthy" / "unhealthy" / "starting"
+        
     if action == "die":
         try:
             exit_code = int(exit_code)
